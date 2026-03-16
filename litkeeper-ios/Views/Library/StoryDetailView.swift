@@ -9,14 +9,12 @@ struct StoryDetailView: View {
     let story: Story
 
     @Query private var localStories: [LocalStory]
-    @State private var downloadProgress: Double = 0
-    @State private var downloadMessage: String = ""
-    @State private var isDownloading = false
     @State private var downloadError: String? = nil
     @State private var currentRating: Int?
     @State private var showDeleteConfirm = false
     @State private var showEPUBReader = false
     @State private var showHTMLReader = false
+    @State private var isSyncing = false
 
     private var localStory: LocalStory? {
         localStories.first { $0.storyID == story.id }
@@ -28,104 +26,43 @@ struct StoryDetailView: View {
 
     var body: some View {
         NavigationStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 20) {
-                    // Hero cover
-                    HStack(spacing: 16) {
-                        CoverImageView(
-                            url: coverURL,
-                            title: story.title,
-                            author: story.author,
-                            token: appState.apiToken
-                        )
-                        .frame(width: 110, height: 165)
-                        .clipShape(RoundedRectangle(cornerRadius: 10))
-                        .shadow(radius: 6)
+            List {
+                // Header — cover + title info, no section background
+                headerSection
+                    .listRowInsets(EdgeInsets())
+                    .listRowBackground(Color.clear)
+                    .listRowSeparator(.hidden)
 
-                        VStack(alignment: .leading, spacing: 6) {
-                            Text(story.title)
-                                .font(.headline)
-                                .lineLimit(3)
-                            Text(story.author)
-                                .font(.subheadline)
-                                .foregroundStyle(.secondary)
-                            if let cat = story.category {
-                                Text(cat)
-                                    .font(.caption)
-                                    .padding(.horizontal, 8)
-                                    .padding(.vertical, 3)
-                                    .background(Capsule().fill(Color.accentColor.opacity(0.15)))
-                                    .foregroundStyle(Color.accentColor)
-                            }
-                            RatingView(rating: currentRating) { newRating in
-                                currentRating = newRating == 0 ? nil : newRating
-                                Task { try? await appState.makeAPIClient().updateRating(storyID: story.id, rating: newRating) }
-                            }
-                        }
-                        Spacer()
-                    }
-                    .padding(.horizontal)
+                // Read buttons
+                readSection
 
-                    Divider()
+                // Stats row
+                statsSection
 
-                    // Stats
-                    statsRow
-                        .padding(.horizontal)
-
-                    // Tags
-                    if !story.tags.isEmpty {
-                        tagsRow
-                            .padding(.horizontal)
-                    }
-
-                    // Description
-                    if let desc = story.description, !desc.isEmpty {
-                        Text(desc)
-                            .font(.callout)
-                            .foregroundStyle(.secondary)
-                            .padding(.horizontal)
-                    }
-
-                    Divider()
-
-                    // Download section
-                    downloadSection
-                        .padding(.horizontal)
-
-                    Divider()
-
-                    // Read buttons
-                    readSection
-                        .padding(.horizontal)
-
-                    // Source link
-                    if let urlString = story.sourceURL, let url = URL(string: urlString) {
-                        Link("View on Literotica →", destination: url)
-                            .font(.footnote)
-                            .padding(.horizontal)
-                    }
-
-                    // Delete
-                    Button(role: .destructive) {
-                        showDeleteConfirm = true
-                    } label: {
-                        Label("Delete from Library", systemImage: "trash")
-                            .frame(maxWidth: .infinity)
-                    }
-                    .buttonStyle(.bordered)
-                    .padding(.horizontal)
-                    .padding(.bottom)
+                // Description
+                if let desc = story.description, !desc.isEmpty {
+                    descriptionSection(desc)
                 }
-                .padding(.top)
+
+                // Tags
+                if !story.tags.isEmpty {
+                    tagsSection
+                }
+
+                // Utility: offline + delete
+                utilitySection
             }
-            .navigationTitle("Story")
+            .listStyle(.insetGrouped)
+            .navigationTitle("")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Done") { dismiss() }
+                        .fontWeight(.semibold)
                 }
             }
-            .confirmationDialog("Delete Story?", isPresented: $showDeleteConfirm, titleVisibility: .visible) {
+            .alert("Delete Story?", isPresented: $showDeleteConfirm) {
+                Button("Cancel", role: .cancel) { }
                 Button("Delete", role: .destructive) {
                     Task {
                         try? await appState.makeAPIClient().deleteStory(storyID: story.id)
@@ -138,7 +75,7 @@ struct StoryDetailView: View {
                     }
                 }
             } message: {
-                Text("This removes the story from the server and device. This cannot be undone.")
+                Text("This permanently removes the story from the server and device.")
             }
             .fullScreenCover(isPresented: $showEPUBReader) {
                 EPUBReaderView(story: story, localStory: localStory, appState: appState)
@@ -150,116 +87,227 @@ struct StoryDetailView: View {
         .onAppear { currentRating = story.rating }
     }
 
-    @ViewBuilder
-    private var statsRow: some View {
-        HStack(spacing: 20) {
-            if let words = story.wordCount {
-                stat(label: "Words", value: formatWordCount(words))
-            }
-            if let chapters = story.chapterCount {
-                stat(label: "Chapters", value: "\(chapters)")
-            }
-            ForEach(story.formats, id: \.self) { format in
-                Text(format.uppercased())
-                    .font(.caption2)
-                    .fontWeight(.semibold)
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 3)
-                    .background(Capsule().fill(.secondary.opacity(0.15)))
-                    .foregroundStyle(.secondary)
-            }
-        }
-    }
+    // MARK: - Header
 
     @ViewBuilder
-    private var tagsRow: some View {
-        FlowLayout(spacing: 6) {
-            ForEach(story.tags, id: \.self) { tag in
-                Text(tag)
-                    .font(.caption)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 3)
-                    .background(Capsule().fill(.secondary.opacity(0.12)))
-                    .foregroundStyle(.secondary)
-            }
-        }
-    }
+    private var headerSection: some View {
+        HStack(alignment: .top, spacing: 16) {
+            CoverImageView(url: coverURL, title: story.title, author: story.author, token: appState.apiToken)
+                .frame(width: 100, height: 150)
+                .clipShape(RoundedRectangle(cornerRadius: 10))
+                .shadow(color: .black.opacity(0.18), radius: 6, x: 0, y: 3)
 
-    @ViewBuilder
-    private var downloadSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Device Storage")
-                .font(.subheadline)
-                .fontWeight(.semibold)
-
-            if isDownloading {
-                VStack(alignment: .leading, spacing: 4) {
-                    ProgressView(value: downloadProgress)
-                    Text(downloadMessage)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-            } else if isDownloaded {
-                Label("Downloaded to device", systemImage: "checkmark.circle.fill")
-                    .foregroundStyle(.green)
-                    .font(.subheadline)
-                Button("Remove from Device", role: .destructive) {
-                    if let local = localStory {
-                        try? DownloadManager.shared.deleteLocalFiles(for: local)
-                        modelContext.delete(local)
-                        try? modelContext.save()
+            VStack(alignment: .leading, spacing: 6) {
+                // Title + source link
+                HStack(alignment: .top, spacing: 6) {
+                    Text(story.title)
+                        .font(.title3)
+                        .fontWeight(.bold)
+                        .foregroundStyle(.primary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    if let urlString = story.sourceURL, let url = URL(string: urlString) {
+                        Link(destination: url) {
+                            Image(systemName: "arrow.up.forward.square")
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                        }
+                        .padding(.top, 2)
                     }
                 }
-                .font(.footnote)
-            } else {
-                Button {
-                    startDownload()
-                } label: {
-                    Label("Download to Device", systemImage: "arrow.down.circle")
-                        .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.borderedProminent)
-            }
 
-            if let err = downloadError {
-                Label(err, systemImage: "exclamationmark.triangle")
-                    .foregroundStyle(.red)
-                    .font(.caption)
+                // Author
+                if let authorURL = story.authorURL, let url = URL(string: authorURL) {
+                    Link(destination: url) {
+                        Text(story.author)
+                            .font(.subheadline)
+                            .foregroundStyle(Color.accentColor)
+                    }
+                } else {
+                    Text(story.author)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+
+                // Category
+                if let cat = story.category {
+                    Text(cat)
+                        .font(.caption)
+                        .fontWeight(.medium)
+                        .foregroundStyle(.secondary)
+                }
+
+                // Offline icon
+                Button {
+                    if isDownloaded {
+                        if let local = localStory {
+                            try? DownloadManager.shared.deleteLocalFiles(for: local)
+                            modelContext.delete(local)
+                            try? modelContext.save()
+                        }
+                    } else {
+                        isSyncing = true
+                        startDownload()
+                    }
+                } label: {
+                    if isSyncing {
+                        ProgressView()
+                            .scaleEffect(0.85)
+                            .frame(width: 44, height: 44)
+                    } else {
+                        Image(systemName: isDownloaded ? "arrow.down.circle.fill" : "arrow.down.circle")
+                            .font(.title)
+                            .foregroundStyle(isDownloaded ? Color.green : Color.secondary)
+                            .frame(width: 44, height: 44)
+                    }
+                }
+                .buttonStyle(.plain)
+                .disabled(isSyncing)
+                .padding(.top, 10)
+
+                Spacer(minLength: 0)
+
+                // Rating
+                RatingView(rating: currentRating) { newRating in
+                    currentRating = newRating == 0 ? nil : newRating
+                    Task { try? await appState.makeAPIClient().updateRating(storyID: story.id, rating: newRating) }
+                }
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
+        .padding(.horizontal, 20)
+        .padding(.vertical, 20)
     }
+
+    // MARK: - Read section
 
     @ViewBuilder
     private var readSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Read")
-                .font(.subheadline)
-                .fontWeight(.semibold)
-            HStack(spacing: 12) {
+        Section {
+            HStack(spacing: 10) {
                 Button {
                     showEPUBReader = true
                 } label: {
-                    Label("EPUB", systemImage: "book")
-                        .frame(maxWidth: .infinity)
+                    HStack(spacing: 6) {
+                        Image(systemName: "book.fill")
+                        Text("Read EPUB")
+                            .fontWeight(.semibold)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 50)
                 }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(.bordered)
+                .tint(.accentColor)
                 .disabled(!canReadEPUB)
 
                 Button {
                     showHTMLReader = true
                 } label: {
-                    Label("HTML", systemImage: "doc.text")
-                        .frame(maxWidth: .infinity)
+                    HStack(spacing: 6) {
+                        Image(systemName: "doc.text")
+                        Text("Read HTML")
+                            .fontWeight(.semibold)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 50)
                 }
                 .buttonStyle(.bordered)
+                .tint(.accentColor)
                 .disabled(!canReadHTML)
             }
-            if !isDownloaded {
-                Text("Download to device for offline reading.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+            .listRowInsets(EdgeInsets(top: 12, leading: 16, bottom: 12, trailing: 16))
+
+            if let err = downloadError {
+                Label(err, systemImage: "exclamationmark.triangle.fill")
+                    .font(.subheadline)
+                    .foregroundStyle(.red)
             }
         }
+    }
+
+    // MARK: - Stats section
+
+    @ViewBuilder
+    private var statsSection: some View {
+        Section {
+            HStack(spacing: 0) {
+                statCell(value: story.wordCount.map { formatWordCount($0) } ?? "—", label: "Words")
+                Divider().frame(height: 36)
+                statCell(value: story.pageCount.map { "\($0)" } ?? "—", label: "Pages")
+                Divider().frame(height: 36)
+                statCell(value: story.size.map { formatSize($0) } ?? "—", label: "Size")
+                Divider().frame(height: 36)
+                statCell(value: story.dateAdded.map { formatDateShort($0) } ?? "—", label: "Added")
+            }
+            .padding(.vertical, 4)
+        }
+    }
+
+    // MARK: - Description section
+
+    @ViewBuilder
+    private func descriptionSection(_ desc: String) -> some View {
+        Section("About") {
+            Text(desc)
+                .font(.body)
+                .foregroundStyle(.primary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    // MARK: - Tags section
+
+    @ViewBuilder
+    private var tagsSection: some View {
+        Section("Tags") {
+            FlowLayout(spacing: 8) {
+                ForEach(story.tags, id: \.self) { tag in
+                    Text(tag)
+                        .font(.footnote)
+                        .fontWeight(.medium)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 5)
+                        .background(Capsule().fill(Color(.systemGray5)))
+                        .foregroundStyle(.primary)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .listRowInsets(EdgeInsets(top: 10, leading: 16, bottom: 10, trailing: 16))
+        }
+    }
+
+    // MARK: - Utility section
+
+    @ViewBuilder
+    private var utilitySection: some View {
+        Section {
+            Button(role: .destructive) {
+                showDeleteConfirm = true
+            } label: {
+                HStack {
+                    Image(systemName: "trash")
+                        .foregroundStyle(.red)
+                    Text("Delete from Library")
+                        .foregroundStyle(.red)
+                }
+            }
+        }
+    }
+
+    // MARK: - Helpers
+
+    @ViewBuilder
+    private func statCell(value: String, label: String) -> some View {
+        VStack(spacing: 4) {
+            Text(value)
+                .font(.subheadline)
+                .fontWeight(.semibold)
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+            Text(label)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity)
     }
 
     private var coverURL: URL? {
@@ -270,7 +318,6 @@ struct StoryDetailView: View {
     }
 
     private func startDownload() {
-        isDownloading = true
         downloadError = nil
         Task {
             do {
@@ -279,66 +326,68 @@ struct StoryDetailView: View {
                     serverBaseURL: appState.serverURL,
                     token: appState.apiToken,
                     modelContext: modelContext
-                ) { fraction, message in
-                    downloadProgress = fraction
-                    downloadMessage = message
-                }
+                ) { _, _ in }
             } catch {
                 downloadError = error.localizedDescription
             }
-            isDownloading = false
-        }
-    }
-
-    private func stat(label: String, value: String) -> some View {
-        VStack(spacing: 2) {
-            Text(value).font(.subheadline).fontWeight(.semibold)
-            Text(label).font(.caption).foregroundStyle(.secondary)
+            isSyncing = false
         }
     }
 
     private func formatWordCount(_ count: Int) -> String {
         count >= 1000 ? String(format: "%.1fk", Double(count) / 1000) : "\(count)"
     }
+
+    private func formatDateShort(_ dateString: String) -> String {
+        let iso = ISO8601DateFormatter()
+        if let date = iso.date(from: dateString) {
+            let fmt = DateFormatter()
+            fmt.dateFormat = "MMM d, yyyy"
+            return fmt.string(from: date)
+        }
+        return dateString
+    }
+
+    private func formatSize(_ bytes: Int) -> String {
+        let mb = Double(bytes) / 1_048_576
+        return mb >= 1 ? String(format: "%.1f MB", mb) : String(format: "%d KB", max(1, bytes / 1024))
+    }
 }
 
-// Simple flow layout for tags
+// MARK: - Flow layout for tags
+
 struct FlowLayout: Layout {
     var spacing: CGFloat = 8
 
     func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
-        let result = FlowResult(in: proposal.replacingUnspecifiedDimensions().width, subviews: subviews, spacing: spacing)
-        return result.bounds
+        layout(in: proposal.replacingUnspecifiedDimensions().width, subviews: subviews).bounds
     }
 
     func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
-        let result = FlowResult(in: bounds.width, subviews: subviews, spacing: spacing)
+        let result = layout(in: bounds.width, subviews: subviews)
         for (index, subview) in subviews.enumerated() {
-            subview.place(at: CGPoint(x: result.frames[index].minX + bounds.minX,
-                                     y: result.frames[index].minY + bounds.minY), proposal: .unspecified)
+            subview.place(
+                at: CGPoint(x: result.frames[index].minX + bounds.minX,
+                            y: result.frames[index].minY + bounds.minY),
+                proposal: .unspecified
+            )
         }
     }
 
-    struct FlowResult {
-        var bounds = CGSize.zero
+    private func layout(in maxWidth: CGFloat, subviews: Subviews) -> (bounds: CGSize, frames: [CGRect]) {
         var frames: [CGRect] = []
-
-        init(in maxWidth: CGFloat, subviews: Subviews, spacing: CGFloat) {
-            var x: CGFloat = 0
-            var y: CGFloat = 0
-            var rowHeight: CGFloat = 0
-            for subview in subviews {
-                let size = subview.sizeThatFits(.unspecified)
-                if x + size.width > maxWidth, x > 0 {
-                    y += rowHeight + spacing
-                    x = 0
-                    rowHeight = 0
-                }
-                frames.append(CGRect(origin: CGPoint(x: x, y: y), size: size))
-                x += size.width + spacing
-                rowHeight = max(rowHeight, size.height)
+        var x: CGFloat = 0, y: CGFloat = 0, rowHeight: CGFloat = 0
+        for subview in subviews {
+            let size = subview.sizeThatFits(.unspecified)
+            if x + size.width > maxWidth, x > 0 {
+                y += rowHeight + spacing
+                x = 0
+                rowHeight = 0
             }
-            bounds = CGSize(width: maxWidth, height: y + rowHeight)
+            frames.append(CGRect(origin: CGPoint(x: x, y: y), size: size))
+            x += size.width + spacing
+            rowHeight = max(rowHeight, size.height)
         }
+        return (CGSize(width: maxWidth, height: y + rowHeight), frames)
     }
 }

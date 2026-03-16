@@ -13,18 +13,21 @@ struct Story: Identifiable, Codable, Hashable {
     var sourceURL: String?
     var wordCount: Int?
     var chapterCount: Int?
+    var pageCount: Int?
+    var size: Int?
     var rating: Int?
     var inQueue: Bool
     var description: String?
     var dateAdded: String?
 
     enum CodingKeys: String, CodingKey {
-        case id, title, author, category, tags, cover, formats, description, rating
+        case id, title, author, category, tags, cover, formats, description, rating, size
         case authorURL = "author_url"
         case filenameBase = "filename_base"
         case sourceURL = "source_url"
         case wordCount = "word_count"
         case chapterCount = "chapter_count"
+        case pageCount = "page_count"
         case inQueue = "in_queue"
         case dateAdded = "date_added"
     }

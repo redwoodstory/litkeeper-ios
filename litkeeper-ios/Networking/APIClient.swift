@@ -22,6 +22,9 @@ actor APIClient {
     func fetchLibrary() async throws -> [Story] {
         let data = try await get("/api/library")
         let response = try decode(LibraryResponse.self, from: data)
+        for story in response.stories {
+            print("[LK-iOS] Story '\(story.title)' (id=\(story.id)) tags=\(story.tags)")
+        }
         return response.stories
     }
 
