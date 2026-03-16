@@ -131,6 +131,7 @@ struct HTMLReaderView: View {
     @State private var showSettings = false
     @State private var scrollProgress: Double = 0
     @State private var highWaterIndex: Int = 0
+    @State private var scrollPositionID: String?
 
     private var theme: ReaderTheme {
         if colorThemeRaw.isEmpty {
@@ -196,53 +197,56 @@ struct HTMLReaderView: View {
     private func readerBody(content: StoryContent) -> some View {
         let totalParas = content.totalParagraphs
 
-        ZStack(alignment: .top) {
-            ScrollViewReader { proxy in
-                ScrollView(.vertical) {
-                    LazyVStack(alignment: .leading, spacing: 0) {
-                        storyHeader(content: content)
+        ScrollView(.vertical) {
+            LazyVStack(alignment: .leading, spacing: 0) {
+                storyHeader(content: content)
 
-                        ForEach(Array(content.chapters.enumerated()), id: \.offset) { ci, chapter in
-                            chapterSection(
-                                chapter: chapter,
-                                chapterIndex: ci,
-                                chapterStart: content.flatIndex(chapterIndex: ci, paragraphIndex: 0),
-                                totalParas: totalParas,
-                                isFirst: ci == 0
-                            )
-                        }
-                        Color.clear.frame(height: 32)
-                    }
-                    .padding(.horizontal, CGFloat(hPadding))
-                    // Top padding keeps the first content clear of the controls bar
-                    .padding(.top, 80)
-                    .padding(.bottom, 20)
+                ForEach(Array(content.chapters.enumerated()), id: \.offset) { ci, chapter in
+                    chapterSection(
+                        chapter: chapter,
+                        chapterIndex: ci,
+                        chapterStart: content.flatIndex(chapterIndex: ci, paragraphIndex: 0),
+                        totalParas: totalParas,
+                        isFirst: ci == 0
+                    )
                 }
-                .background(theme.background)
-                .onTapGesture {
-                    withAnimation(.easeInOut(duration: 0.2)) { showControls.toggle() }
-                }
-                .onAppear {
-                    let saved = localStory?.readingProgressScrollY ?? 0
-                    guard saved > 0 else { return }
-                    highWaterIndex = Int(saved * Double(max(totalParas - 1, 1)))
-                    scrollProgress = saved
-                    if let (ci, pi) = content.chapterAndParagraph(for: highWaterIndex) {
-                        let id = "p-\(content.flatIndex(chapterIndex: ci, paragraphIndex: pi))"
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
-                            proxy.scrollTo(id, anchor: .top)
-                        }
-                    }
-                }
+                Color.clear.frame(height: 32)
             }
-
-            if showControls {
-                controlsOverlay
-                    .transition(.opacity)
+            .padding(.horizontal, CGFloat(hPadding))
+            // Top padding keeps the first content clear of the controls bar
+            .padding(.top, 80)
+            .padding(.bottom, 20)
+        }
+        .background(theme.background)
+        // iOS 17 scrollPosition works with LazyVStack — items are rendered before scroll attempt
+        .scrollPosition(id: $scrollPositionID, anchor: .top)
+        .onTapGesture {
+            withAnimation(.easeInOut(duration: 0.25)) { showControls.toggle() }
+        }
+        .onAppear {
+            let saved = localStory?.readingProgressScrollY ?? 0
+            guard saved > 0 else { return }
+            let paraIndex = Int(saved * Double(max(totalParas - 1, 1)))
+            highWaterIndex = paraIndex
+            scrollProgress = saved
+            if let (ci, pi) = content.chapterAndParagraph(for: paraIndex) {
+                scrollPositionID = "p-\(content.flatIndex(chapterIndex: ci, paragraphIndex: pi))"
             }
         }
-        .animation(.easeInOut(duration: 0.2), value: showControls)
         .ignoresSafeArea(edges: .bottom)
+        .overlay(alignment: .top) {
+            if showControls {
+                headerBar
+                    .transition(.move(edge: .top).combined(with: .opacity))
+            }
+        }
+        .overlay(alignment: .bottom) {
+            if showControls {
+                footerBar
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+        }
+        .animation(.easeInOut(duration: 0.25), value: showControls)
         .sheet(isPresented: $showSettings) {
             ReaderSettingsView(
                 fontSize: $fontSize,
@@ -376,55 +380,51 @@ struct HTMLReaderView: View {
             }
     }
 
-    // MARK: - Controls overlay
+    // MARK: - Controls overlay (header + footer rendered separately for directional transitions)
 
-    private var controlsOverlay: some View {
-        VStack(spacing: 0) {
-            // Header bar
-            HStack {
-                Button { dismiss() } label: {
-                    Image(systemName: "xmark")
-                        .font(.title3)
-                        .padding(10)
-                        .background(Circle().fill(.regularMaterial))
-                }
-                Spacer()
-                Text(story.title)
-                    .font(.subheadline.weight(.medium))
-                    .foregroundStyle(theme.text)
-                    .lineLimit(1)
-                    .padding(.horizontal, 8)
-                Spacer()
-                Button { showSettings = true } label: {
-                    Image(systemName: "textformat.size")
-                        .font(.title3)
-                        .padding(10)
-                        .background(Circle().fill(.regularMaterial))
-                }
+    private var headerBar: some View {
+        HStack {
+            Button { dismiss() } label: {
+                Image(systemName: "xmark")
+                    .font(.title3)
+                    .padding(10)
+                    .background(Circle().fill(.regularMaterial))
             }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 10)
-            .background(theme.card.opacity(0.96))
-            .overlay(alignment: .bottom) {
-                Rectangle().fill(theme.border).frame(height: 0.5)
-            }
-
             Spacer()
+            Text(story.title)
+                .font(.subheadline.weight(.medium))
+                .foregroundStyle(theme.text)
+                .lineLimit(1)
+                .padding(.horizontal, 8)
+            Spacer()
+            Button { showSettings = true } label: {
+                Image(systemName: "textformat.size")
+                    .font(.title3)
+                    .padding(10)
+                    .background(Circle().fill(.regularMaterial))
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
+        .background(theme.card.opacity(0.96))
+        .overlay(alignment: .bottom) {
+            Rectangle().fill(theme.border).frame(height: 0.5)
+        }
+    }
 
-            // Footer bar
-            VStack(spacing: 4) {
-                ProgressView(value: scrollProgress)
-                Text("\(Int(scrollProgress * 100))%")
-                    .font(.caption2.monospacedDigit())
-                    .foregroundStyle(theme.secondary)
-            }
-            .padding(.horizontal, 16)
-            .padding(.top, 10)
-            .padding(.bottom, 12)
-            .background(theme.card.opacity(0.96))
-            .overlay(alignment: .top) {
-                Rectangle().fill(theme.border).frame(height: 0.5)
-            }
+    private var footerBar: some View {
+        VStack(spacing: 4) {
+            ProgressView(value: scrollProgress)
+            Text("\(Int(scrollProgress * 100))%")
+                .font(.caption2.monospacedDigit())
+                .foregroundStyle(theme.secondary)
+        }
+        .padding(.horizontal, 16)
+        .padding(.top, 10)
+        .padding(.bottom, 12)
+        .background(theme.card.opacity(0.96))
+        .overlay(alignment: .top) {
+            Rectangle().fill(theme.border).frame(height: 0.5)
         }
     }
 
