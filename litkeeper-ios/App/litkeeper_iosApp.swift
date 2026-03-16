@@ -35,8 +35,11 @@ struct RootView: View {
             LibraryView()
                 .tabItem { Label("Library", systemImage: "books.vertical") }
 
+            ReadingQueueView()
+                .tabItem { Label("Reading Queue", systemImage: "list.bullet") }
+
             QueueView()
-                .tabItem { Label("Queue", systemImage: "clock") }
+                .tabItem { Label("History", systemImage: "clock") }
         }
         .fullScreenCover(isPresented: Binding(
             get: { appState.isLocked },

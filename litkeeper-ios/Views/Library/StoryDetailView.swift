@@ -15,6 +15,7 @@ struct StoryDetailView: View {
     @State private var showEPUBReader = false
     @State private var showHTMLReader = false
     @State private var isSyncing = false
+    @State private var isInQueue = false
 
     private var localStory: LocalStory? {
         localStories.first { $0.storyID == story.id }
@@ -84,7 +85,10 @@ struct StoryDetailView: View {
                 HTMLReaderView(story: story, localStory: localStory, appState: appState)
             }
         }
-        .onAppear { currentRating = story.rating }
+        .onAppear {
+            currentRating = story.rating
+            isInQueue = story.inQueue
+        }
     }
 
     // MARK: - Header
@@ -136,32 +140,46 @@ struct StoryDetailView: View {
                         .foregroundStyle(.secondary)
                 }
 
-                // Offline icon
-                Button {
-                    if isDownloaded {
-                        if let local = localStory {
-                            try? DownloadManager.shared.deleteLocalFiles(for: local)
-                            modelContext.delete(local)
-                            try? modelContext.save()
+                // Offline + queue icons
+                HStack(spacing: 4) {
+                    Button {
+                        if isDownloaded {
+                            if let local = localStory {
+                                try? DownloadManager.shared.deleteLocalFiles(for: local)
+                                modelContext.delete(local)
+                                try? modelContext.save()
+                            }
+                        } else {
+                            isSyncing = true
+                            startDownload()
                         }
-                    } else {
-                        isSyncing = true
-                        startDownload()
+                    } label: {
+                        if isSyncing {
+                            ProgressView()
+                                .scaleEffect(0.85)
+                                .frame(width: 44, height: 44)
+                        } else {
+                            Image(systemName: isDownloaded ? "arrow.down.circle.fill" : "arrow.down.circle")
+                                .font(.title)
+                                .foregroundStyle(isDownloaded ? Color.green : Color.secondary)
+                                .frame(width: 44, height: 44)
+                        }
                     }
-                } label: {
-                    if isSyncing {
-                        ProgressView()
-                            .scaleEffect(0.85)
-                            .frame(width: 44, height: 44)
-                    } else {
-                        Image(systemName: isDownloaded ? "arrow.down.circle.fill" : "arrow.down.circle")
+                    .buttonStyle(.plain)
+                    .disabled(isSyncing)
+
+                    Button {
+                        isInQueue.toggle()
+                        let newValue = isInQueue
+                        Task { try? await appState.makeAPIClient().updateQueue(storyID: story.id, inQueue: newValue) }
+                    } label: {
+                        Image(systemName: isInQueue ? "list.bullet.circle.fill" : "list.bullet.circle")
                             .font(.title)
-                            .foregroundStyle(isDownloaded ? Color.green : Color.secondary)
+                            .foregroundStyle(isInQueue ? Color.accentColor : Color.secondary)
                             .frame(width: 44, height: 44)
                     }
+                    .buttonStyle(.plain)
                 }
-                .buttonStyle(.plain)
-                .disabled(isSyncing)
                 .padding(.top, 10)
 
                 Spacer(minLength: 0)

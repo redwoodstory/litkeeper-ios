@@ -132,6 +132,7 @@ struct HTMLReaderView: View {
     @State private var scrollProgress: Double = 0
     @State private var highWaterIndex: Int = 0
     @State private var scrollPositionID: String?
+    @State private var serverScrollFraction: Double? = nil
 
     private var theme: ReaderTheme {
         if colorThemeRaw.isEmpty {
@@ -159,6 +160,23 @@ struct HTMLReaderView: View {
             }
         }
         .task { await loadContent() }
+        .onDisappear {
+            guard scrollProgress > 0 else {
+                print("[HTML] onDisappear: scrollProgress=0, skipping server save")
+                return
+            }
+            let fraction = scrollProgress
+            let storyID = story.id
+            print("[HTML] onDisappear: saving fraction=\(String(format: "%.4f", fraction)) (\(Int(fraction * 100))%) to server for story \(storyID)")
+            let progress = ReadingProgress(
+                currentChapter: nil,
+                cfi: nil,
+                percentage: fraction,
+                isCompleted: fraction >= 0.99,
+                lastReadAt: nil
+            )
+            Task { try? await appState.makeAPIClient().saveProgress(storyID: storyID, progress: progress) }
+        }
     }
 
     // MARK: - Loading / error states
@@ -191,6 +209,40 @@ struct HTMLReaderView: View {
         .background(theme.background)
     }
 
+    // MARK: - Reader items (flattened for true laziness)
+
+    private enum ReaderItem: Identifiable {
+        case header
+        case chapterDivider(chapterIndex: Int)
+        case chapterTitle(chapterIndex: Int, title: String)
+        case paragraph(flatIndex: Int, text: String, totalParas: Int)
+
+        var id: String {
+            switch self {
+            case .header:                         return "header"
+            case .chapterDivider(let ci):         return "div-\(ci)"
+            case .chapterTitle(let ci, _):        return "title-\(ci)"
+            case .paragraph(let fi, _, _):        return "p-\(fi)"
+            }
+        }
+    }
+
+    private func buildItems(content: StoryContent) -> [ReaderItem] {
+        let totalParas = content.totalParagraphs
+        var items: [ReaderItem] = [.header]
+        for (ci, chapter) in content.chapters.enumerated() {
+            if ci > 0 { items.append(.chapterDivider(chapterIndex: ci)) }
+            if let title = chapter.title, !title.isEmpty {
+                items.append(.chapterTitle(chapterIndex: ci, title: title))
+            }
+            let chapterStart = content.flatIndex(chapterIndex: ci, paragraphIndex: 0)
+            for (pi, text) in chapter.paragraphs.enumerated() {
+                items.append(.paragraph(flatIndex: chapterStart + pi, text: text, totalParas: totalParas))
+            }
+        }
+        return items
+    }
+
     // MARK: - Reader body
 
     @ViewBuilder
@@ -199,16 +251,32 @@ struct HTMLReaderView: View {
 
         ScrollView(.vertical) {
             LazyVStack(alignment: .leading, spacing: 0) {
-                storyHeader(content: content)
-
-                ForEach(Array(content.chapters.enumerated()), id: \.offset) { ci, chapter in
-                    chapterSection(
-                        chapter: chapter,
-                        chapterIndex: ci,
-                        chapterStart: content.flatIndex(chapterIndex: ci, paragraphIndex: 0),
-                        totalParas: totalParas,
-                        isFirst: ci == 0
-                    )
+                ForEach(buildItems(content: content)) { item in
+                    switch item {
+                    case .header:
+                        storyHeader(content: content)
+                    case .chapterDivider:
+                        HStack {
+                            Spacer()
+                            Text("◆  ◆  ◆")
+                                .font(.caption)
+                                .foregroundStyle(theme.secondary.opacity(0.5))
+                            Spacer()
+                        }
+                        .padding(.vertical, 36)
+                    case .chapterTitle(_, let title):
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text(title)
+                                .font(.title2.weight(.semibold))
+                                .foregroundStyle(theme.text)
+                            Rectangle()
+                                .fill(theme.border)
+                                .frame(height: 1.5)
+                        }
+                        .padding(.bottom, 24)
+                    case .paragraph(let flatIndex, let text, let totalParas):
+                        paragraphView(text: text, flatIndex: flatIndex, totalParas: totalParas)
+                    }
                 }
                 Color.clear.frame(height: 32)
             }
@@ -224,13 +292,25 @@ struct HTMLReaderView: View {
             withAnimation(.easeInOut(duration: 0.25)) { showControls.toggle() }
         }
         .onAppear {
-            let saved = localStory?.readingProgressScrollY ?? 0
-            guard saved > 0 else { return }
+            let localFraction = localStory?.readingProgressScrollY ?? 0
+            let saved = localFraction > 0 ? localFraction : (serverScrollFraction ?? 0)
+            print("[HTML] onAppear: localScrollY=\(localFraction), serverFraction=\(serverScrollFraction?.description ?? "nil"), using saved=\(String(format: "%.4f", saved))")
+            guard saved > 0 else {
+                print("[HTML] onAppear: no saved progress, starting at beginning")
+                return
+            }
             let paraIndex = Int(saved * Double(max(totalParas - 1, 1)))
             highWaterIndex = paraIndex
             scrollProgress = saved
             if let (ci, pi) = content.chapterAndParagraph(for: paraIndex) {
-                scrollPositionID = "p-\(content.flatIndex(chapterIndex: ci, paragraphIndex: pi))"
+                let targetID = "p-\(content.flatIndex(chapterIndex: ci, paragraphIndex: pi))"
+                print("[HTML] onAppear: scheduling scroll to paragraph \(paraIndex)/\(totalParas), id=\(targetID)")
+                // Defer one frame so LazyVStack can register item IDs before scroll fires
+                Task { @MainActor in
+                    try? await Task.sleep(nanoseconds: 50_000_000)
+                    scrollPositionID = targetID
+                    print("[HTML] onAppear: scrollPositionID set to \(targetID)")
+                }
             }
         }
         .ignoresSafeArea(edges: .bottom)
@@ -315,46 +395,6 @@ struct HTMLReaderView: View {
         .padding(.bottom, 28)
     }
 
-    // MARK: - Chapter content
-
-    @ViewBuilder
-    private func chapterSection(
-        chapter: StoryContent.Chapter,
-        chapterIndex: Int,
-        chapterStart: Int,
-        totalParas: Int,
-        isFirst: Bool
-    ) -> some View {
-        VStack(alignment: .leading, spacing: 0) {
-            if !isFirst {
-                HStack {
-                    Spacer()
-                    Text("◆  ◆  ◆")
-                        .font(.caption)
-                        .foregroundStyle(theme.secondary.opacity(0.5))
-                    Spacer()
-                }
-                .padding(.vertical, 36)
-            }
-
-            if let title = chapter.title, !title.isEmpty {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text(title)
-                        .font(.title2.weight(.semibold))
-                        .foregroundStyle(theme.text)
-                    Rectangle()
-                        .fill(theme.border)
-                        .frame(height: 1.5)
-                }
-                .padding(.bottom, 24)
-            }
-
-            ForEach(Array(chapter.paragraphs.enumerated()), id: \.offset) { pi, text in
-                paragraphView(text: text, flatIndex: chapterStart + pi, totalParas: totalParas)
-            }
-        }
-    }
-
     @ViewBuilder
     private func paragraphView(text: String, flatIndex: Int, totalParas: Int) -> some View {
         Text(text)
@@ -366,12 +406,17 @@ struct HTMLReaderView: View {
             // Paragraph spacing: notably larger than the per-line gap, matching CSS margin-bottom.
             .padding(.bottom, CGFloat(fontSize * lineSpacing * 0.6))
             .fixedSize(horizontal: false, vertical: true)
-            .id("p-\(flatIndex)")
             .onAppear {
                 guard flatIndex > highWaterIndex else { return }
                 highWaterIndex = flatIndex
                 let fraction = Double(flatIndex) / Double(max(totalParas - 1, 1))
                 scrollProgress = fraction
+                // Log every ~10% milestone
+                let prevPct = Int((fraction - (1.0 / Double(max(totalParas - 1, 1)))) * 10)
+                let newPct  = Int(fraction * 10)
+                if newPct > prevPct {
+                    print("[HTML] Progress: paragraph \(flatIndex)/\(totalParas), fraction=\(String(format: "%.3f", fraction)) (\(Int(fraction * 100))%)")
+                }
                 if let localStory {
                     localStory.readingProgressScrollY = fraction
                     localStory.readingProgressPercentage = fraction * 100
@@ -444,42 +489,75 @@ struct HTMLReaderView: View {
     // MARK: - Content loading
 
     private func loadContent() async {
-        if let path = localStory?.htmlLocalPath {
+        // Capture everything from appState/story/localStory BEFORE any await.
+        // loadContent() is nonisolated async — after any suspension it resumes on a
+        // background thread, so reading @Observable / @Environment values after an
+        // await is unsafe and can silently produce stale or nil results.
+        let storyID       = story.id
+        let filenameBase  = story.filenameBase
+        let localHTMLPath = localStory?.htmlLocalPath
+        let localScrollY  = localStory?.readingProgressScrollY
+        let client: APIClient? = appState.isConfigured ? appState.makeAPIClient() : nil
+        let serverBase    = appState.serverURL.hasSuffix("/")
+            ? String(appState.serverURL.dropLast())
+            : appState.serverURL
+        let apiToken      = appState.apiToken
+
+        // ── 1. Load story JSON ────────────────────────────────────────────
+        let decoded: StoryContent
+
+        if let path = localHTMLPath {
             let fileURL = DownloadManager.shared.htmlDirectory.appendingPathComponent(path)
             do {
                 let data = try Data(contentsOf: fileURL)
-                let decoded = try JSONDecoder().decode(StoryContent.self, from: data)
-                await MainActor.run { content = decoded; isLoading = false }
+                decoded = try JSONDecoder().decode(StoryContent.self, from: data)
+                print("[HTML] loadContent: loaded from local file (\(data.count)B)")
             } catch {
                 await MainActor.run { loadError = "Could not load local file."; isLoading = false }
-            }
-            return
-        }
-
-        let base = appState.serverURL.hasSuffix("/")
-            ? String(appState.serverURL.dropLast())
-            : appState.serverURL
-        guard let url = URL(string: "\(base)/download/\(story.filenameBase).json") else {
-            await MainActor.run { loadError = "Invalid server URL."; isLoading = false }
-            return
-        }
-        var request = URLRequest(url: url)
-        if !appState.apiToken.isEmpty {
-            request.setValue("Bearer \(appState.apiToken)", forHTTPHeaderField: "Authorization")
-        }
-        do {
-            let (data, response) = try await URLSession.shared.data(for: request)
-            guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
-                await MainActor.run { loadError = "Server returned an error."; isLoading = false }
                 return
             }
-            let decoded = try JSONDecoder().decode(StoryContent.self, from: data)
-            await MainActor.run { content = decoded; isLoading = false }
-        } catch {
-            await MainActor.run {
-                loadError = "Could not load story: \(error.localizedDescription)"
-                isLoading = false
+        } else {
+            guard let url = URL(string: "\(serverBase)/download/\(filenameBase).json") else {
+                await MainActor.run { loadError = "Invalid server URL."; isLoading = false }
+                return
             }
+            var request = URLRequest(url: url)
+            if !apiToken.isEmpty {
+                request.setValue("Bearer \(apiToken)", forHTTPHeaderField: "Authorization")
+            }
+            do {
+                let (data, response) = try await URLSession.shared.data(for: request)
+                guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
+                    await MainActor.run { loadError = "Server returned an error."; isLoading = false }
+                    return
+                }
+                decoded = try JSONDecoder().decode(StoryContent.self, from: data)
+                print("[HTML] loadContent: loaded from server (\(data.count)B)")
+            } catch {
+                await MainActor.run {
+                    loadError = "Could not load story: \(error.localizedDescription)"
+                    isLoading = false
+                }
+                return
+            }
+        }
+
+        // ── 2. Fetch server reading progress ─────────────────────────────
+        var progressFraction: Double? = nil
+        if let c = client {
+            print("[HTML] loadContent: fetching server progress for story \(storyID)…")
+            let serverProgress = try? await c.fetchProgress(storyID: storyID)
+            progressFraction = serverProgress?.percentage
+            print("[HTML] loadContent: serverProgress.percentage=\(progressFraction?.description ?? "nil"), localScrollY=\(localScrollY?.description ?? "nil")")
+        } else {
+            print("[HTML] loadContent: server not configured, skipping progress fetch")
+        }
+
+        // ── 3. Commit to main thread ──────────────────────────────────────
+        await MainActor.run {
+            content = decoded
+            serverScrollFraction = progressFraction
+            isLoading = false
         }
     }
 }

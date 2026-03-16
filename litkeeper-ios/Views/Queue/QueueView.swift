@@ -74,7 +74,7 @@ struct QueueView: View {
                     }
                 }
             }
-            .navigationTitle("Queue")
+            .navigationTitle("History")
             .toolbar {
                 if viewModel.isLoading {
                     ToolbarItem(placement: .navigationBarTrailing) {

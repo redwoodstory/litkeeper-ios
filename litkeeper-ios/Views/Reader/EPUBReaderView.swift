@@ -23,6 +23,7 @@ struct EPUBReaderView: View {
                 serverURL: appState.serverURL,
                 token: appState.apiToken,
                 onRelocate: { fraction, title in
+                    print("[EPUB] onRelocate: fraction=\(String(format: "%.4f", fraction)) (\(Int(fraction * 100))%), chapter=\(title ?? "nil")")
                     readingFraction = fraction
                     chapterTitle = title ?? ""
                     if let localStory {
@@ -71,7 +72,28 @@ struct EPUBReaderView: View {
             }
         }
         .statusBarHidden(!showControls)
-        .onAppear { readingFraction = (localStory?.readingProgressPercentage ?? 0) / 100 }
+        .onAppear {
+            let localPct = (localStory?.readingProgressPercentage ?? 0) / 100
+            print("[EPUB] onAppear: restoring readingFraction=\(String(format: "%.4f", localPct)) from localStory.readingProgressPercentage=\(localStory?.readingProgressPercentage ?? 0)")
+            readingFraction = localPct
+        }
+        .onDisappear {
+            guard readingFraction > 0 else {
+                print("[EPUB] onDisappear: readingFraction=0, skipping server save")
+                return
+            }
+            let fraction = readingFraction
+            let storyID = story.id
+            print("[EPUB] onDisappear: saving fraction=\(String(format: "%.4f", fraction)) (\(Int(fraction * 100))%) to server for story \(storyID)")
+            let progress = ReadingProgress(
+                currentChapter: nil,
+                cfi: localStory?.readingProgressCFI,
+                percentage: fraction,
+                isCompleted: fraction >= 0.99,
+                lastReadAt: nil
+            )
+            Task { try? await appState.makeAPIClient().saveProgress(storyID: storyID, progress: progress) }
+        }
     }
 }
 
@@ -116,7 +138,12 @@ struct EPUBWebView: UIViewRepresentable {
         return webView
     }
 
-    func updateUIView(_ webView: WKWebView, context: Context) {}
+    func updateUIView(_ webView: WKWebView, context: Context) {
+        // Keep coordinator closures current so state updates (showControls toggle, etc.)
+        // don't cause onRelocate to capture stale @State bindings.
+        context.coordinator.onRelocate = onRelocate
+        context.coordinator.onTap = onTap
+    }
 
     // MARK: Coordinator
 

@@ -83,6 +83,10 @@ actor APIClient {
         _ = try await post("/api/story/\(storyID)/rating", body: ["rating": rating])
     }
 
+    func updateQueue(storyID: Int, inQueue: Bool) async throws {
+        _ = try await post("/api/story/\(storyID)/queue", body: ["in_queue": inQueue])
+    }
+
     func deleteStory(storyID: Int) async throws {
         _ = try await delete("/api/story/delete/\(storyID)")
     }
