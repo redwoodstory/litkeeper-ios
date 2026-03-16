@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body { height: 100%; overflow: hidden; background: var(--bg, #ffffff); }
+    foliate-view { display: block; width: 100%; height: 100%; }
+    #loading {
+      position: fixed; inset: 0;
+      display: flex; align-items: center; justify-content: center;
+      font-family: -apple-system, sans-serif; color: #666;
+      background: var(--bg, #ffffff);
+    }
+  </style>
+</head>
+<body>
+  <div id="loading">Opening…</div>
+  <foliate-view></foliate-view>
+
+  <script type="module">
+    import './foliate-js/view.js';
+
+    const view = document.querySelector('foliate-view');
+    const loading = document.getElementById('loading');
+
+    // Receive messages from Swift
+    window.addEventListener('message', async (e) => {
+      const { type, payload } = e.data ?? {};
+
+      if (type === 'open') {
+        try {
+          const response = await fetch(payload.url);
+          if (!response.ok) throw new Error('Failed to fetch EPUB');
+          const blob = await response.blob();
+          await view.open(blob);
+          loading.style.display = 'none';
+          if (payload.cfi) {
+            try { await view.goTo(payload.cfi); } catch {}
+          }
+        } catch (err) {
+          loading.textContent = 'Error: ' + err.message;
+        }
+      }
+
+      if (type === 'setStyles') {
+        view.renderer?.setStyles?.(payload.css);
+      }
+
+      if (type === 'goTo') {
+        try { await view.goTo(payload.cfi); } catch {}
+      }
+    });
+
+    // Send progress back to Swift
+    view.addEventListener('relocate', (e) => {
+      const { cfi, fraction, chapterTitle } = e.detail ?? {};
+      window.webkit?.messageHandlers?.progress?.postMessage({
+        cfi: cfi ?? null,
+        fraction: fraction ?? 0,
+        chapterTitle: chapterTitle ?? null
+      });
+    });
+
+    // Tap center to toggle UI — send to Swift
+    document.addEventListener('click', (e) => {
+      const { clientX, clientY } = e;
+      const { innerWidth, innerHeight } = window;
+      const inCenter = clientX > innerWidth * 0.2 && clientX < innerWidth * 0.8
+                    && clientY > innerHeight * 0.2 && clientY < innerHeight * 0.8;
+      if (inCenter) {
+        window.webkit?.messageHandlers?.tap?.postMessage({ x: clientX, y: clientY });
+      }
+    });
+  </script>
+</body>
+</html>
