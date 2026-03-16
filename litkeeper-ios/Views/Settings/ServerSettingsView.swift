@@ -7,6 +7,7 @@ struct ServerSettingsView: View {
     @State private var tokenDraft: String = ""
     @State private var testResult: TestResult? = nil
     @State private var isTesting = false
+    @State private var showDisconnectConfirm = false
 
     enum TestResult {
         case success
@@ -61,6 +62,14 @@ struct ServerSettingsView: View {
                     }
                 }
             }
+
+            if !urlDraft.isEmpty || !tokenDraft.isEmpty {
+                Section {
+                    Button("Disconnect Server", role: .destructive) {
+                        showDisconnectConfirm = true
+                    }
+                }
+            }
         }
         .navigationTitle("Server")
         .navigationBarTitleDisplayMode(.inline)
@@ -75,6 +84,21 @@ struct ServerSettingsView: View {
         .onChange(of: tokenDraft) { _, new in
             appState.apiToken = new
             testResult = nil
+        }
+        .confirmationDialog(
+            "Disconnect from server?",
+            isPresented: $showDisconnectConfirm,
+            titleVisibility: .visible
+        ) {
+            Button("Disconnect", role: .destructive) {
+                appState.serverURL = ""
+                appState.apiToken = ""
+                urlDraft = ""
+                tokenDraft = ""
+                testResult = nil
+            }
+        } message: {
+            Text("This removes the saved server URL and API token from this device. Your library on the server is unaffected.")
         }
     }
 

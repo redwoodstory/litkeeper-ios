@@ -18,8 +18,13 @@ struct LibraryView: View {
         NavigationStack {
             Group {
                 if viewModel.isLoading && viewModel.stories.isEmpty {
-                    ProgressView("Loading library…")
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    VStack(spacing: 12) {
+                        ProgressView()
+                        Text("Syncing library from server…")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else if !appState.isConfigured {
                     EmptyStateView(
                         icon: "server.rack",
@@ -44,7 +49,8 @@ struct LibraryView: View {
                                     StoryCard(
                                         story: story,
                                         isDownloaded: viewModel.isDownloaded(story),
-                                        coverURL: coverURL(for: story)
+                                        coverURL: coverURL(for: story),
+                                        token: appState.apiToken
                                     )
                                 }
                                 .buttonStyle(.plain)
@@ -116,14 +122,22 @@ struct LibraryView: View {
             viewModel.updateDownloadedIDs(from: localStories)
             await viewModel.refresh(appState: appState)
         }
+        .onChange(of: appState.isConfigured) { wasConfigured, isConfigured in
+            if isConfigured && !wasConfigured {
+                Task { await viewModel.refresh(appState: appState) }
+            } else if !isConfigured {
+                viewModel.stories = []
+            }
+        }
         .onChange(of: localStories) { _, new in
             viewModel.updateDownloadedIDs(from: new)
         }
     }
 
     private func coverURL(for story: Story) -> URL? {
-        guard let cover = story.cover, !appState.serverURL.isEmpty else { return nil }
+        guard !appState.serverURL.isEmpty else { return nil }
+        let filename = story.cover ?? "\(story.filenameBase).jpg"
         let base = appState.serverURL.hasSuffix("/") ? String(appState.serverURL.dropLast()) : appState.serverURL
-        return URL(string: "\(base)/api/cover/\(cover)")
+        return URL(string: "\(base)/api/cover/\(filename)")
     }
 }

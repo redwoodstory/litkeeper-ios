@@ -6,15 +6,13 @@ final class AppState {
     var serverURL: String {
         didSet { UserDefaults.standard.set(serverURL, forKey: "serverURL") }
     }
+    var apiToken: String {
+        didSet { KeychainHelper.write(key: "apiToken", value: apiToken) }
+    }
     var biometricLockEnabled: Bool {
         didSet { UserDefaults.standard.set(biometricLockEnabled, forKey: "biometricLockEnabled") }
     }
     var isLocked: Bool = false
-
-    var apiToken: String {
-        get { KeychainHelper.read(key: "apiToken") ?? "" }
-        set { KeychainHelper.write(key: "apiToken", value: newValue) }
-    }
 
     var isConfigured: Bool {
         !serverURL.isEmpty && !apiToken.isEmpty
@@ -22,6 +20,7 @@ final class AppState {
 
     init() {
         serverURL = UserDefaults.standard.string(forKey: "serverURL") ?? ""
+        apiToken = KeychainHelper.read(key: "apiToken") ?? ""
         biometricLockEnabled = UserDefaults.standard.bool(forKey: "biometricLockEnabled")
     }
 

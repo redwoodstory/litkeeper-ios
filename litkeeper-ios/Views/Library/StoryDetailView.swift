@@ -35,7 +35,8 @@ struct StoryDetailView: View {
                         CoverImageView(
                             url: coverURL,
                             title: story.title,
-                            author: story.author
+                            author: story.author,
+                            token: appState.apiToken
                         )
                         .frame(width: 110, height: 165)
                         .clipShape(RoundedRectangle(cornerRadius: 10))
@@ -266,9 +267,10 @@ struct StoryDetailView: View {
     }
 
     private var coverURL: URL? {
-        guard let cover = story.cover, !appState.serverURL.isEmpty else { return nil }
+        guard !appState.serverURL.isEmpty else { return nil }
+        let filename = story.cover ?? "\(story.filenameBase).jpg"
         let base = appState.serverURL.hasSuffix("/") ? String(appState.serverURL.dropLast()) : appState.serverURL
-        return URL(string: "\(base)/api/cover/\(cover)")
+        return URL(string: "\(base)/api/cover/\(filename)")
     }
 
     private func startDownload() {

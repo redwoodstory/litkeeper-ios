@@ -174,20 +174,34 @@ actor APIClient {
     }
 
     private func perform(_ request: URLRequest) async throws -> Data {
+        let method = request.httpMethod ?? "GET"
+        let path = request.url?.path ?? "?"
+        let start = Date()
+        print("[LK-API] → \(method) \(path)")
         do {
             let (data, response) = try await session.data(for: request)
             guard let http = response as? HTTPURLResponse else {
                 throw APIError.networkError(URLError(.badServerResponse))
             }
+            let elapsed = String(format: "%.2fs", Date().timeIntervalSince(start))
             switch http.statusCode {
-            case 200...299: return data
-            case 401: throw APIError.unauthorized
-            case 404: throw APIError.notFound
-            default: throw APIError.serverError(http.statusCode)
+            case 200...299:
+                print("[LK-API] ← \(http.statusCode) \(path) (\(elapsed), \(data.count)B)")
+                return data
+            case 401:
+                print("[LK-API] ✗ 401 Unauthorized \(path)")
+                throw APIError.unauthorized
+            case 404:
+                print("[LK-API] ✗ 404 Not Found \(path)")
+                throw APIError.notFound
+            default:
+                print("[LK-API] ✗ \(http.statusCode) Server Error \(path)")
+                throw APIError.serverError(http.statusCode)
             }
         } catch let error as APIError {
             throw error
         } catch {
+            print("[LK-API] ✗ Network error on \(path): \(error.localizedDescription)")
             throw APIError.networkError(error)
         }
     }
@@ -197,6 +211,7 @@ actor APIClient {
             let decoder = JSONDecoder()
             return try decoder.decode(type, from: data)
         } catch {
+            print("[LK-API] ✗ Decode error for \(T.self): \(error)")
             throw APIError.decodingError(error)
         }
     }

@@ -4,28 +4,52 @@ struct CoverImageView: View {
     let url: URL?
     let title: String
     let author: String
+    var token: String = ""
+
+    @State private var loadedImage: UIImage? = nil
 
     var body: some View {
         GeometryReader { geo in
-            if let url {
-                AsyncImage(url: url) { phase in
-                    switch phase {
-                    case .success(let image):
-                        image
-                            .resizable()
-                            .aspectRatio(contentMode: .fill)
-                            .frame(width: geo.size.width, height: geo.size.height)
-                            .clipped()
-                    case .failure, .empty:
-                        placeholderView(size: geo.size)
-                    @unknown default:
-                        placeholderView(size: geo.size)
-                    }
+            Group {
+                if let img = loadedImage {
+                    Image(uiImage: img)
+                        .resizable()
+                        .aspectRatio(contentMode: .fill)
+                        .frame(width: geo.size.width, height: geo.size.height)
+                        .clipped()
+                } else {
+                    placeholderView(size: geo.size)
                 }
-            } else {
-                placeholderView(size: geo.size)
             }
         }
+        .task(id: url) {
+            loadedImage = nil
+            await loadImage()
+        }
+    }
+
+    private func loadImage() async {
+        guard let url else { return }
+        print("[LK-IMG] → \(url.lastPathComponent)")
+        var request = URLRequest(url: url)
+        if !token.isEmpty {
+            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        }
+        guard let (data, response) = try? await URLSession.shared.data(for: request),
+              let http = response as? HTTPURLResponse else {
+            print("[LK-IMG] ✗ No response for \(url.lastPathComponent)")
+            return
+        }
+        guard http.statusCode == 200 else {
+            print("[LK-IMG] ✗ HTTP \(http.statusCode) for \(url.lastPathComponent)")
+            return
+        }
+        guard let img = UIImage(data: data) else {
+            print("[LK-IMG] ✗ Invalid image data for \(url.lastPathComponent) (\(data.count)B)")
+            return
+        }
+        print("[LK-IMG] ← \(url.lastPathComponent) (\(data.count)B)")
+        loadedImage = img
     }
 
     @ViewBuilder
@@ -51,7 +75,6 @@ struct CoverImageView: View {
     }
 
     private var coverColor: Color {
-        // Deterministic color from title
         let hash = abs(title.hashValue)
         let colors: [Color] = [.blue, .purple, .indigo, .teal, .cyan, .mint, .green, .orange]
         return colors[hash % colors.count]
