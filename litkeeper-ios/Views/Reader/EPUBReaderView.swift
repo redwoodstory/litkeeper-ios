@@ -3,7 +3,8 @@ import WebKit
 import SwiftData
 
 struct EPUBReaderView: View {
-    let localStory: LocalStory
+    let story: Story
+    let localStory: LocalStory?
     let appState: AppState
 
     @Environment(\.modelContext) private var modelContext
@@ -16,14 +17,18 @@ struct EPUBReaderView: View {
     var body: some View {
         ZStack(alignment: .top) {
             EPUBWebView(
-                filenameBase: localStory.filenameBase,
-                initialCFI: localStory.readingProgressCFI,
+                storyID: story.id,
+                filenameBase: story.filenameBase,
+                initialCFI: localStory?.readingProgressCFI,
+                serverURL: appState.serverURL,
+                token: appState.apiToken,
                 onRelocate: { fraction, title in
                     readingFraction = fraction
                     chapterTitle = title ?? ""
-                    // Persist progress
-                    localStory.readingProgressPercentage = fraction * 100
-                    try? modelContext.save()
+                    if let localStory {
+                        localStory.readingProgressPercentage = fraction * 100
+                        try? modelContext.save()
+                    }
                 },
                 onTap: {
                     withAnimation(.easeInOut(duration: 0.2)) { showControls.toggle() }
@@ -66,20 +71,23 @@ struct EPUBReaderView: View {
             }
         }
         .statusBarHidden(!showControls)
-        .onAppear { readingFraction = (localStory.readingProgressPercentage ?? 0) / 100 }
+        .onAppear { readingFraction = (localStory?.readingProgressPercentage ?? 0) / 100 }
     }
 }
 
 // MARK: - UIViewRepresentable
 
 struct EPUBWebView: UIViewRepresentable {
+    let storyID: Int
     let filenameBase: String
     let initialCFI: String?
+    let serverURL: String
+    let token: String
     var onRelocate: (Double, String?) -> Void
     var onTap: () -> Void
 
     func makeCoordinator() -> Coordinator {
-        Coordinator(filenameBase: filenameBase, initialCFI: initialCFI,
+        Coordinator(storyID: storyID, filenameBase: filenameBase, initialCFI: initialCFI,
                     onRelocate: onRelocate, onTap: onTap)
     }
 
@@ -87,7 +95,13 @@ struct EPUBWebView: UIViewRepresentable {
         let config = WKWebViewConfiguration()
         config.userContentController.add(context.coordinator, name: "progress")
         config.userContentController.add(context.coordinator, name: "tap")
-        config.setURLSchemeHandler(EPUBSchemeHandler(), forURLScheme: "epub-local")
+
+        let base = serverURL.hasSuffix("/") ? String(serverURL.dropLast()) : serverURL
+        let handler = EPUBSchemeHandler(
+            serverBase: URL(string: base),
+            token: token.isEmpty ? nil : token
+        )
+        config.setURLSchemeHandler(handler, forURLScheme: "epub-local")
         config.allowsInlineMediaPlayback = true
         config.mediaTypesRequiringUserActionForPlayback = []
 
@@ -98,10 +112,7 @@ struct EPUBWebView: UIViewRepresentable {
         webView.navigationDelegate = context.coordinator
         context.coordinator.webView = webView
 
-        guard let htmlURL = Bundle.main.url(forResource: "epub-reader", withExtension: "html") else {
-            return webView
-        }
-        webView.loadFileURL(htmlURL, allowingReadAccessTo: Bundle.main.bundleURL)
+        webView.load(URLRequest(url: URL(string: "epub-local://app/epub-reader.html")!))
         return webView
     }
 
@@ -110,22 +121,23 @@ struct EPUBWebView: UIViewRepresentable {
     // MARK: Coordinator
 
     final class Coordinator: NSObject, WKScriptMessageHandler, WKNavigationDelegate {
+        let storyID: Int
         let filenameBase: String
         let initialCFI: String?
         var onRelocate: (Double, String?) -> Void
         var onTap: () -> Void
         weak var webView: WKWebView?
 
-        init(filenameBase: String, initialCFI: String?,
+        init(storyID: Int, filenameBase: String, initialCFI: String?,
              onRelocate: @escaping (Double, String?) -> Void,
              onTap: @escaping () -> Void) {
+            self.storyID = storyID
             self.filenameBase = filenameBase
             self.initialCFI = initialCFI
             self.onRelocate = onRelocate
             self.onTap = onTap
         }
 
-        // WKScriptMessageHandler
         func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
             switch message.name {
             case "progress":
@@ -139,14 +151,13 @@ struct EPUBWebView: UIViewRepresentable {
             }
         }
 
-        // WKNavigationDelegate — fired after epub-reader.html finishes loading
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
             let cfi = initialCFI ?? ""
             let escapedCFI = cfi.replacingOccurrences(of: "'", with: "\\'")
             let js = """
             window.postMessage({
               type: 'open',
-              payload: { url: 'epub-local://\(filenameBase)', cfi: '\(escapedCFI)' }
+              payload: { url: 'epub-local://epub/\(storyID)/\(filenameBase)', cfi: '\(escapedCFI)' }
             }, '*');
             """
             webView.evaluateJavaScript(js)

@@ -31,6 +31,19 @@ struct CoverImageView: View {
     private func loadImage() async {
         guard let url else { return }
         print("[LK-IMG] → \(url.lastPathComponent)")
+
+        // Local file — read directly without HTTP
+        if url.isFileURL {
+            guard let data = try? Data(contentsOf: url),
+                  let img = UIImage(data: data) else {
+                print("[LK-IMG] ✗ Could not read local file \(url.lastPathComponent)")
+                return
+            }
+            print("[LK-IMG] ← \(url.lastPathComponent) (local, \(data.count)B)")
+            loadedImage = img
+            return
+        }
+
         var request = URLRequest(url: url)
         if !token.isEmpty {
             request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")

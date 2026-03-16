@@ -23,8 +23,8 @@ struct StoryDetailView: View {
     }
 
     private var isDownloaded: Bool { localStory != nil }
-    private var canReadEPUB: Bool { localStory?.hasEPUB == true }
-    private var canReadHTML: Bool { localStory?.hasHTML == true }
+    private var canReadEPUB: Bool { story.hasEPUB }
+    private var canReadHTML: Bool { story.hasHTML }
 
     var body: some View {
         NavigationStack {
@@ -141,14 +141,10 @@ struct StoryDetailView: View {
                 Text("This removes the story from the server and device. This cannot be undone.")
             }
             .fullScreenCover(isPresented: $showEPUBReader) {
-                if let local = localStory {
-                    EPUBReaderView(localStory: local, appState: appState)
-                }
+                EPUBReaderView(story: story, localStory: localStory, appState: appState)
             }
             .fullScreenCover(isPresented: $showHTMLReader) {
-                if let local = localStory {
-                    HTMLReaderView(localStory: local, appState: appState)
-                }
+                HTMLReaderView(story: story, localStory: localStory, appState: appState)
             }
         }
         .onAppear { currentRating = story.rating }
@@ -259,7 +255,7 @@ struct StoryDetailView: View {
                 .disabled(!canReadHTML)
             }
             if !isDownloaded {
-                Text("Download to device to read offline.")
+                Text("Download to device for offline reading.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

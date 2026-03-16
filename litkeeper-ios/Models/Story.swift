@@ -31,7 +31,8 @@ struct Story: Identifiable, Codable, Hashable {
 
     // Computed helpers
     var hasEPUB: Bool { formats.contains("epub") }
-    var hasHTML: Bool { formats.contains("html") }
+    // Server stores this format as "json" (the file is a JSON document rendered to HTML for reading)
+    var hasHTML: Bool { formats.contains("html") || formats.contains("json") }
 }
 
 struct LibraryResponse: Codable {

@@ -35,9 +35,6 @@ struct RootView: View {
             LibraryView()
                 .tabItem { Label("Library", systemImage: "books.vertical") }
 
-            DownloadsView()
-                .tabItem { Label("Downloaded", systemImage: "arrow.down.circle") }
-
             QueueView()
                 .tabItem { Label("Queue", systemImage: "clock") }
         }

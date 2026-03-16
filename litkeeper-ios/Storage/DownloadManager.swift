@@ -29,7 +29,7 @@ final class DownloadManager {
     }
 
     func localHTMLURL(filenameBase: String) -> URL {
-        htmlDirectory.appendingPathComponent("\(filenameBase).html")
+        htmlDirectory.appendingPathComponent("\(filenameBase).json")
     }
 
     func localCoverURL(filename: String) -> URL {
@@ -81,10 +81,10 @@ final class DownloadManager {
         // 2. HTML
         if story.hasHTML {
             onProgress(story.hasEPUB ? 0.5 : 0.0, "Downloading HTML…")
-            let url = base.appendingPathComponent("download/html/\(story.filenameBase).html")
+            let url = base.appendingPathComponent("download/\(story.filenameBase).json")
             let dest = localHTMLURL(filenameBase: story.filenameBase)
             try await downloadFile(from: url, token: token, to: dest)
-            htmlPath = "\(story.filenameBase).html"
+            htmlPath = "\(story.filenameBase).json"
             onProgress(0.85, "HTML saved")
         }
 
