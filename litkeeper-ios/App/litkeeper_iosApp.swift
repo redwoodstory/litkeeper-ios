@@ -40,6 +40,11 @@ struct RootView: View {
 
             QueueView()
                 .tabItem { Label("History", systemImage: "clock") }
+
+            NavigationStack {
+                SettingsView()
+            }
+            .tabItem { Label("Settings", systemImage: "gearshape") }
         }
         .task { WebViewPrewarmer.shared.prewarm() }
         .fullScreenCover(isPresented: Binding(

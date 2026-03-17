@@ -16,13 +16,7 @@ struct ReadingQueueView: View {
                         message: "Add your server URL and API token in Settings to get started."
                     )
                 } else if viewModel.isLoading && viewModel.stories.isEmpty {
-                    VStack(spacing: 12) {
-                        ProgressView()
-                        Text("Loading reading queue…")
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                    }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    ReadingQueueSkeletonView()
                 } else if viewModel.queuedStories.isEmpty {
                     EmptyStateView(
                         icon: "list.bullet",

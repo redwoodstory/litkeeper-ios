@@ -18,13 +18,7 @@ struct LibraryView: View {
         NavigationStack {
             Group {
                 if viewModel.isLoading && viewModel.stories.isEmpty {
-                    VStack(spacing: 12) {
-                        ProgressView()
-                        Text("Syncing library from server…")
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                    }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    LibrarySkeletonView()
                 } else if !appState.isConfigured {
                     EmptyStateView(
                         icon: "server.rack",
@@ -66,23 +60,16 @@ struct LibraryView: View {
             .navigationTitle("LitKeeper")
             .searchable(text: $viewModel.searchText, prompt: "Search title or author")
             .toolbar {
-                ToolbarItem(placement: .navigationBarLeading) {
-                    Button {
-                        showFilterSort = true
-                    } label: {
-                        Image(systemName: "line.3.horizontal.decrease.circle")
-                    }
-                }
                 ToolbarItemGroup(placement: .navigationBarTrailing) {
                     Button {
                         showAddStory = true
                     } label: {
                         Image(systemName: "plus")
                     }
-                    NavigationLink {
-                        SettingsView()
+                    Button {
+                        showFilterSort = true
                     } label: {
-                        Image(systemName: "gearshape")
+                        Image(systemName: "line.3.horizontal.decrease.circle")
                     }
                 }
             }

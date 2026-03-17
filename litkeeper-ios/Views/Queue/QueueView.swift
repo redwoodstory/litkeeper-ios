@@ -13,7 +13,9 @@ struct QueueView: View {
                         title: "Server Not Configured",
                         message: "Add your server URL and API token in Settings."
                     )
-                } else if viewModel.items.isEmpty && !viewModel.isLoading {
+                } else if viewModel.isLoading && viewModel.items.isEmpty {
+                    QueueSkeletonView()
+                } else if viewModel.items.isEmpty {
                     EmptyStateView(
                         icon: "clock",
                         title: "Queue Empty",
