@@ -12,6 +12,7 @@ final class LocalStory {
     var htmlLocalPath: String?    // relative to Documents/LitKeeper/stories/html/
     var coverLocalPath: String?   // relative to Documents/LitKeeper/stories/covers/
     var downloadedAt: Date
+    var serverUpdatedAt: Date?
     var lastReadAt: Date?
     var readingProgressCFI: String?
     var readingProgressLocator: String?

@@ -7,6 +7,7 @@ struct CoverImageView: View {
     var token: String = ""
 
     @State private var loadedImage: UIImage? = nil
+    @State private var isLoading: Bool = true
 
     var body: some View {
         GeometryReader { geo in
@@ -17,6 +18,9 @@ struct CoverImageView: View {
                         .aspectRatio(contentMode: .fill)
                         .frame(width: geo.size.width, height: geo.size.height)
                         .clipped()
+                } else if isLoading {
+                    SkeletonShape()
+                        .frame(width: geo.size.width, height: geo.size.height)
                 } else {
                     placeholderView(size: geo.size)
                 }
@@ -24,7 +28,9 @@ struct CoverImageView: View {
         }
         .task(id: url) {
             loadedImage = nil
+            isLoading = true
             await loadImage()
+            isLoading = false
         }
     }
 

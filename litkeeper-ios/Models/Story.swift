@@ -19,6 +19,7 @@ struct Story: Identifiable, Codable, Hashable {
     var inQueue: Bool
     var description: String?
     var dateAdded: String?
+    var updatedAt: String?
 
     enum CodingKeys: String, CodingKey {
         case id, title, author, category, tags, cover, formats, description, rating, size
@@ -30,6 +31,7 @@ struct Story: Identifiable, Codable, Hashable {
         case pageCount = "page_count"
         case inQueue = "in_queue"
         case dateAdded = "date_added"
+        case updatedAt = "updated_at"
     }
 
     // Computed helpers

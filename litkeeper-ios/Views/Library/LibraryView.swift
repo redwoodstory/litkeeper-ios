@@ -3,6 +3,8 @@ import SwiftData
 
 struct LibraryView: View {
     @Environment(AppState.self) private var appState
+    @Environment(SyncService.self) private var syncService
+    @Environment(\.modelContext) private var modelContext
     @Query private var localStories: [LocalStory]
 
     @State private var viewModel = LibraryViewModel()
@@ -54,6 +56,8 @@ struct LibraryView: View {
                     }
                     .refreshable {
                         await viewModel.refresh(appState: appState)
+                        Task { await syncService.syncCovers(for: viewModel.stories, serverURL: appState.serverURL, token: appState.apiToken) }
+                        Task { await syncService.syncContent(for: viewModel.stories, serverURL: appState.serverURL, token: appState.apiToken, modelContext: modelContext, localStories: localStories) }
                     }
                 }
             }
@@ -108,6 +112,8 @@ struct LibraryView: View {
         .task {
             viewModel.updateDownloadedIDs(from: localStories)
             await viewModel.refresh(appState: appState)
+            Task { await syncService.syncCovers(for: viewModel.stories, serverURL: appState.serverURL, token: appState.apiToken) }
+            Task { await syncService.syncContent(for: viewModel.stories, serverURL: appState.serverURL, token: appState.apiToken, modelContext: modelContext, localStories: localStories) }
         }
         .onChange(of: appState.isConfigured) { wasConfigured, isConfigured in
             if isConfigured && !wasConfigured {
@@ -122,8 +128,11 @@ struct LibraryView: View {
     }
 
     private func coverURL(for story: Story) -> URL? {
-        guard !appState.serverURL.isEmpty else { return nil }
         let filename = story.cover ?? "\(story.filenameBase).jpg"
+        if syncService.localCoverFilenames.contains(filename) {
+            return DownloadManager.shared.localCoverURL(filename: filename)
+        }
+        guard !appState.serverURL.isEmpty else { return nil }
         let base = appState.serverURL.hasSuffix("/") ? String(appState.serverURL.dropLast()) : appState.serverURL
         return URL(string: "\(base)/api/cover/\(filename)")
     }

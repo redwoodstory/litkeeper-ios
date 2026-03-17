@@ -5,11 +5,13 @@ import SwiftData
 struct LitKeeperApp: App {
     @Environment(\.scenePhase) private var scenePhase
     @State private var appState = AppState()
+    @State private var syncService = SyncService()
 
     var body: some Scene {
         WindowGroup {
             RootView()
                 .environment(appState)
+                .environment(syncService)
                 .onChange(of: scenePhase) { _, phase in
                     switch phase {
                     case .background:

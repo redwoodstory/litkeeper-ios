@@ -2,6 +2,7 @@ import SwiftUI
 
 struct ReadingQueueView: View {
     @Environment(AppState.self) private var appState
+    @Environment(SyncService.self) private var syncService
 
     @State private var viewModel = ReadingQueueViewModel()
     @State private var selectedStory: Story?
@@ -90,8 +91,11 @@ struct ReadingQueueView: View {
     }
 
     private func coverURL(for story: Story) -> URL? {
-        guard !appState.serverURL.isEmpty else { return nil }
         let filename = story.cover ?? "\(story.filenameBase).jpg"
+        if syncService.localCoverFilenames.contains(filename) {
+            return DownloadManager.shared.localCoverURL(filename: filename)
+        }
+        guard !appState.serverURL.isEmpty else { return nil }
         let base = appState.serverURL.hasSuffix("/") ? String(appState.serverURL.dropLast()) : appState.serverURL
         return URL(string: "\(base)/api/cover/\(filename)")
     }

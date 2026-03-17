@@ -1,0 +1,128 @@
+import Foundation
+import SwiftData
+
+@Observable
+@MainActor
+final class SyncService {
+    private(set) var localCoverFilenames: Set<String> = []
+    private(set) var isSyncingCovers = false
+    private(set) var isSyncingContent = false
+
+    private static let isoFormatter: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return f
+    }()
+
+    init() {
+        populateLocalCoversFromDisk()
+    }
+
+    // MARK: - Cover Sync
+
+    func syncCovers(for stories: [Story], serverURL: String, token: String) async {
+        guard !serverURL.isEmpty, !token.isEmpty, !isSyncingCovers else { return }
+        isSyncingCovers = true
+        defer { isSyncingCovers = false }
+
+        let base = serverURL.hasSuffix("/") ? String(serverURL.dropLast()) : serverURL
+
+        await withTaskGroup(of: (String, Data)?.self) { group in
+            for story in stories {
+                let filename = story.cover ?? "\(story.filenameBase).jpg"
+                let localURL = DownloadManager.shared.localCoverURL(filename: filename)
+
+                if FileManager.default.fileExists(atPath: localURL.path) {
+                    if let updatedAtStr = story.updatedAt,
+                       let serverDate = Self.isoFormatter.date(from: updatedAtStr),
+                       let attrs = try? FileManager.default.attributesOfItem(atPath: localURL.path),
+                       let fileDate = attrs[.modificationDate] as? Date,
+                       fileDate >= serverDate {
+                        localCoverFilenames.insert(filename)
+                        continue
+                    }
+                }
+
+                guard let remoteURL = URL(string: "\(base)/api/cover/\(filename)") else { continue }
+                let capturedFilename = filename
+                let capturedToken = token
+
+                group.addTask {
+                    var request = URLRequest(url: remoteURL)
+                    request.setValue("Bearer \(capturedToken)", forHTTPHeaderField: "Authorization")
+                    guard let (data, response) = try? await URLSession.shared.data(for: request),
+                          let http = response as? HTTPURLResponse,
+                          http.statusCode == 200 else { return nil }
+                    return (capturedFilename, data)
+                }
+            }
+
+            for await result in group {
+                guard let (filename, data) = result else { continue }
+                let localURL = DownloadManager.shared.localCoverURL(filename: filename)
+                try? data.write(to: localURL)
+                localCoverFilenames.insert(filename)
+            }
+        }
+    }
+
+    // MARK: - Content Sync
+
+    func syncContent(
+        for stories: [Story],
+        serverURL: String,
+        token: String,
+        modelContext: ModelContext,
+        localStories: [LocalStory]
+    ) async {
+        guard !serverURL.isEmpty, !token.isEmpty, !isSyncingContent else { return }
+        isSyncingContent = true
+        defer { isSyncingContent = false }
+
+        let localByID = Dictionary(uniqueKeysWithValues: localStories.map { ($0.storyID, $0) })
+
+        for story in stories {
+            let local = localByID[story.id]
+
+            var needsSync = false
+            if local == nil {
+                needsSync = true
+            } else if let updatedAtStr = story.updatedAt,
+                      let serverDate = Self.isoFormatter.date(from: updatedAtStr) {
+                needsSync = local?.serverUpdatedAt.map { serverDate > $0 } ?? true
+            }
+
+            guard needsSync else { continue }
+
+            do {
+                try await DownloadManager.shared.downloadStory(
+                    story: story,
+                    serverBaseURL: serverURL,
+                    token: token,
+                    modelContext: modelContext,
+                    onProgress: { _, _ in }
+                )
+                if let updatedAtStr = story.updatedAt,
+                   let serverDate = Self.isoFormatter.date(from: updatedAtStr) {
+                    let storyID = story.id
+                    if let record = (try? modelContext.fetch(
+                        FetchDescriptor<LocalStory>(predicate: #Predicate { $0.storyID == storyID })
+                    ))?.first {
+                        record.serverUpdatedAt = serverDate
+                        try? modelContext.save()
+                    }
+                }
+            } catch {
+                print("[LK-Sync] ✗ Failed to sync story \(story.id): \(error)")
+            }
+        }
+    }
+
+    // MARK: - Private
+
+    private func populateLocalCoversFromDisk() {
+        let dir = DownloadManager.shared.coversDirectory
+        guard let contents = try? FileManager.default.contentsOfDirectory(atPath: dir.path) else { return }
+        localCoverFilenames = Set(contents)
+    }
+}

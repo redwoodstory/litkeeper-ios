@@ -3,6 +3,7 @@ import SwiftData
 
 struct StoryDetailView: View {
     @Environment(AppState.self) private var appState
+    @Environment(SyncService.self) private var syncService
     @Environment(\.modelContext) private var modelContext
     @Environment(\.dismiss) private var dismiss
 
@@ -367,8 +368,11 @@ struct StoryDetailView: View {
     }
 
     private var coverURL: URL? {
-        guard !appState.serverURL.isEmpty else { return nil }
         let filename = story.cover ?? "\(story.filenameBase).jpg"
+        if syncService.localCoverFilenames.contains(filename) {
+            return DownloadManager.shared.localCoverURL(filename: filename)
+        }
+        guard !appState.serverURL.isEmpty else { return nil }
         let base = appState.serverURL.hasSuffix("/") ? String(appState.serverURL.dropLast()) : appState.serverURL
         return URL(string: "\(base)/api/cover/\(filename)")
     }
