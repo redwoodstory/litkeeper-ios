@@ -112,8 +112,18 @@ struct LibraryView: View {
         .task {
             viewModel.updateDownloadedIDs(from: localStories)
             await viewModel.refresh(appState: appState)
+            Task { await syncService.syncMetadata(appState: appState, modelContext: modelContext) }
             Task { await syncService.syncCovers(for: viewModel.stories, serverURL: appState.serverURL, token: appState.apiToken) }
             Task { await syncService.syncContent(for: viewModel.stories, serverURL: appState.serverURL, token: appState.apiToken, modelContext: modelContext, localStories: localStories) }
+        }
+        .task {
+            // Periodic library + metadata sync — fires every 5 minutes while the view is active
+            repeat {
+                try? await Task.sleep(for: .seconds(300))
+                guard !Task.isCancelled else { break }
+                await viewModel.refresh(appState: appState)
+                await syncService.syncMetadata(appState: appState, modelContext: modelContext)
+            } while !Task.isCancelled
         }
         .onChange(of: appState.isConfigured) { wasConfigured, isConfigured in
             if isConfigured && !wasConfigured {

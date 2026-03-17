@@ -7,6 +7,7 @@ final class SyncService {
     private(set) var localCoverFilenames: Set<String> = []
     private(set) var isSyncingCovers = false
     private(set) var isSyncingContent = false
+    private(set) var isSyncingMetadata = false
 
     private static let isoFormatter: ISO8601DateFormatter = {
         let f = ISO8601DateFormatter()
@@ -116,6 +117,60 @@ final class SyncService {
                 print("[LK-Sync] ✗ Failed to sync story \(story.id): \(error)")
             }
         }
+    }
+
+    // MARK: - Cover Resync (after metadata change)
+
+    func resyncCover(coverFilename: String, serverURL: String, token: String) async {
+        guard !serverURL.isEmpty, !token.isEmpty else { return }
+
+        let localURL = DownloadManager.shared.localCoverURL(filename: coverFilename)
+        try? FileManager.default.removeItem(at: localURL)
+        localCoverFilenames.remove(coverFilename)
+
+        let base = serverURL.hasSuffix("/") ? String(serverURL.dropLast()) : serverURL
+        guard let remoteURL = URL(string: "\(base)/api/cover/\(coverFilename)") else { return }
+
+        var request = URLRequest(url: remoteURL)
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        guard let (data, response) = try? await URLSession.shared.data(for: request),
+              let http = response as? HTTPURLResponse,
+              http.statusCode == 200 else { return }
+
+        try? data.write(to: localURL)
+        localCoverFilenames.insert(coverFilename)
+        print("[LK-Sync] ✓ Cover resynced: \(coverFilename)")
+    }
+
+    // MARK: - Metadata Sync
+
+    func syncMetadata(appState: AppState, modelContext: ModelContext) async {
+        guard appState.isConfigured, !isSyncingMetadata else { return }
+        isSyncingMetadata = true
+        defer { isSyncingMetadata = false }
+
+        let localStories: [LocalStory]
+        do {
+            localStories = try modelContext.fetch(FetchDescriptor<LocalStory>())
+        } catch {
+            print("[LK-Sync] ✗ syncMetadata: failed to fetch LocalStory records: \(error)")
+            return
+        }
+        guard !localStories.isEmpty else { return }
+
+        let client = appState.makeAPIClient()
+        let ids = localStories.map { $0.storyID }
+        let progressMap = await client.fetchAllProgress(storyIDs: ids)
+        guard !progressMap.isEmpty else { return }
+
+        for story in localStories {
+            if let p = progressMap[story.storyID], let pct = p.percentage {
+                story.readingProgressScrollY = pct
+                story.readingProgressPercentage = pct * 100
+            }
+        }
+        try? modelContext.save()
+        print("[LK-Sync] ✓ Metadata sync complete — progress updated for \(progressMap.count) stories")
     }
 
     // MARK: - Private

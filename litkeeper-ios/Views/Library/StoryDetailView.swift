@@ -18,6 +18,12 @@ struct StoryDetailView: View {
     @State private var showHTMLReader = false
     @State private var isSyncing = false
     @State private var isInQueue = false
+    @State private var editableTitle: String = ""
+    @State private var editableAuthor: String = ""
+    @State private var editableCategory: String = ""
+    @State private var editableDescription: String = ""
+    @State private var editableTags: [String] = []
+    @State private var showEditStory = false
 
     private var localStory: LocalStory? {
         localStories.first { $0.storyID == story.id }
@@ -48,12 +54,12 @@ struct StoryDetailView: View {
                 statsSection
 
                 // Description
-                if let desc = story.description, !desc.isEmpty {
-                    descriptionSection(desc)
+                if !editableDescription.isEmpty {
+                    descriptionSection
                 }
 
                 // Tags
-                if !story.tags.isEmpty {
+                if !editableTags.isEmpty {
                     tagsSection
                 }
 
@@ -64,6 +70,11 @@ struct StoryDetailView: View {
             .navigationTitle("")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    Button { showEditStory = true } label: {
+                        Image(systemName: "pencil")
+                    }
+                }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Done") { dismiss() }
                         .fontWeight(.semibold)
@@ -99,10 +110,42 @@ struct StoryDetailView: View {
             .fullScreenCover(isPresented: $showHTMLReader) {
                 HTMLReaderView(story: story, localStory: localStory, appState: appState)
             }
+            .sheet(isPresented: $showEditStory) {
+                EditStoryForm(
+                    title: $editableTitle,
+                    author: $editableAuthor,
+                    category: $editableCategory,
+                    description: $editableDescription,
+                    tags: $editableTags,
+                    onSave: {
+                        let coverRegenerated = (try? await appState.makeAPIClient().updateMetadata(
+                            storyID: story.id,
+                            title: editableTitle,
+                            author: editableAuthor,
+                            category: editableCategory.isEmpty ? nil : editableCategory,
+                            description: editableDescription.isEmpty ? nil : editableDescription,
+                            tags: editableTags
+                        )) ?? false
+                        if coverRegenerated {
+                            let filename = story.cover ?? "\(story.filenameBase).jpg"
+                            await syncService.resyncCover(
+                                coverFilename: filename,
+                                serverURL: appState.serverURL,
+                                token: appState.apiToken
+                            )
+                        }
+                    }
+                )
+            }
         }
         .onAppear {
             currentRating = story.rating
             isInQueue = story.inQueue
+            editableTitle = story.title
+            editableAuthor = story.author
+            editableCategory = story.category ?? ""
+            editableDescription = story.description ?? ""
+            editableTags = story.tags
         }
     }
 
@@ -111,7 +154,7 @@ struct StoryDetailView: View {
     @ViewBuilder
     private var headerSection: some View {
         HStack(alignment: .top, spacing: 16) {
-            CoverImageView(url: coverURL, title: story.title, author: story.author, token: appState.apiToken)
+            CoverImageView(url: coverURL, title: editableTitle, author: editableAuthor, token: appState.apiToken)
                 .frame(width: 100, height: 150)
                 .clipShape(RoundedRectangle(cornerRadius: 10))
                 .shadow(color: .black.opacity(0.18), radius: 6, x: 0, y: 3)
@@ -119,7 +162,7 @@ struct StoryDetailView: View {
             VStack(alignment: .leading, spacing: 6) {
                 // Title + source link
                 HStack(alignment: .top, spacing: 6) {
-                    Text(story.title)
+                    Text(editableTitle)
                         .font(.title3)
                         .fontWeight(.bold)
                         .foregroundStyle(.primary)
@@ -137,19 +180,19 @@ struct StoryDetailView: View {
                 // Author
                 if let authorURL = story.authorURL, let url = URL(string: authorURL) {
                     Link(destination: url) {
-                        Text(story.author)
+                        Text(editableAuthor)
                             .font(.subheadline)
                             .foregroundStyle(Color.accentColor)
                     }
                 } else {
-                    Text(story.author)
+                    Text(editableAuthor)
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                 }
 
                 // Category
-                if let cat = story.category {
-                    Text(cat)
+                if !editableCategory.isEmpty {
+                    Text(editableCategory)
                         .font(.caption)
                         .fontWeight(.medium)
                         .foregroundStyle(.secondary)
@@ -278,9 +321,9 @@ struct StoryDetailView: View {
     // MARK: - Description section
 
     @ViewBuilder
-    private func descriptionSection(_ desc: String) -> some View {
+    private var descriptionSection: some View {
         Section("About") {
-            Text(desc)
+            Text(editableDescription)
                 .font(.body)
                 .foregroundStyle(.primary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -293,7 +336,7 @@ struct StoryDetailView: View {
     private var tagsSection: some View {
         Section("Tags") {
             FlowLayout(spacing: 8) {
-                ForEach(story.tags, id: \.self) { tag in
+                ForEach(editableTags, id: \.self) { tag in
                     Text(tag)
                         .font(.footnote)
                         .fontWeight(.medium)
@@ -460,5 +503,92 @@ struct FlowLayout: Layout {
             rowHeight = max(rowHeight, size.height)
         }
         return (CGSize(width: maxWidth, height: y + rowHeight), frames)
+    }
+}
+
+// MARK: - Edit Story Form
+
+private struct EditStoryForm: View {
+    @Binding var title: String
+    @Binding var author: String
+    @Binding var category: String
+    @Binding var description: String
+    @Binding var tags: [String]
+    let onSave: () async -> Void
+
+    @State private var newTag = ""
+    @State private var isSaving = false
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    LabeledContent("Title") {
+                        TextField("Required", text: $title)
+                            .multilineTextAlignment(.trailing)
+                    }
+                    LabeledContent("Author") {
+                        TextField("Required", text: $author)
+                            .multilineTextAlignment(.trailing)
+                    }
+                    LabeledContent("Category") {
+                        TextField("Optional", text: $category)
+                            .multilineTextAlignment(.trailing)
+                    }
+                }
+
+                Section("Description") {
+                    TextEditor(text: $description)
+                        .frame(minHeight: 80)
+                }
+
+                Section("Tags") {
+                    ForEach(tags.indices, id: \.self) { index in
+                        Text(tags[index])
+                    }
+                    .onDelete { offsets in
+                        tags.remove(atOffsets: offsets)
+                    }
+                    HStack {
+                        TextField("Add tag", text: $newTag)
+                            .onSubmit(addTag)
+                        Button("Add", action: addTag)
+                            .disabled(newTag.trimmingCharacters(in: .whitespaces).isEmpty)
+                    }
+                }
+            }
+            .navigationTitle("Edit Story")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    if isSaving {
+                        ProgressView()
+                    } else {
+                        Button("Save") {
+                            isSaving = true
+                            Task {
+                                await onSave()
+                                isSaving = false
+                                dismiss()
+                            }
+                        }
+                        .fontWeight(.semibold)
+                        .disabled(title.trimmingCharacters(in: .whitespaces).isEmpty ||
+                                  author.trimmingCharacters(in: .whitespaces).isEmpty)
+                    }
+                }
+            }
+        }
+    }
+
+    private func addTag() {
+        let trimmed = newTag.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty else { return }
+        tags.append(trimmed)
+        newTag = ""
     }
 }

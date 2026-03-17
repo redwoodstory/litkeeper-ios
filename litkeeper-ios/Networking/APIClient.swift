@@ -99,11 +99,16 @@ actor APIClient {
         _ = try await delete("/api/story/delete/\(storyID)")
     }
 
-    func updateMetadata(storyID: Int, title: String, author: String, category: String?, description: String?) async throws {
-        var body: [String: Any] = ["title": title, "author": author]
+    func updateMetadata(storyID: Int, title: String, author: String, category: String?, description: String?, tags: [String]) async throws -> Bool {
+        var body: [String: Any] = ["title": title, "author": author, "tags": tags]
         if let cat = category { body["category"] = cat }
         if let desc = description { body["description"] = desc }
-        _ = try await put("/api/story/\(storyID)/metadata", body: body)
+        let data = try await put("/api/story/\(storyID)/metadata", body: body)
+        struct Response: Decodable {
+            let coverRegenerated: Bool
+            enum CodingKeys: String, CodingKey { case coverRegenerated = "cover_regenerated" }
+        }
+        return (try? decode(Response.self, from: data))?.coverRegenerated ?? false
     }
 
     // MARK: - Reading Progress
@@ -111,6 +116,19 @@ actor APIClient {
     func fetchProgress(storyID: Int) async throws -> ReadingProgress {
         let data = try await get("/epub/api/progress/\(storyID)")
         return try decode(ReadingProgress.self, from: data)
+    }
+
+    func fetchAllProgress(storyIDs: [Int]) async -> [Int: ReadingProgress] {
+        await withTaskGroup(of: (Int, ReadingProgress?).self) { group in
+            for id in storyIDs {
+                group.addTask { (id, try? await self.fetchProgress(storyID: id)) }
+            }
+            var result: [Int: ReadingProgress] = [:]
+            for await (id, progress) in group {
+                if let p = progress { result[id] = p }
+            }
+            return result
+        }
     }
 
     func saveProgress(storyID: Int, progress: ReadingProgress) async throws {

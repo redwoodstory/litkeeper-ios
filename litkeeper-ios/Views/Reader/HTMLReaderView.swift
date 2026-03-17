@@ -133,6 +133,7 @@ struct HTMLReaderView: View {
     @State private var highWaterIndex: Int = 0
     @State private var scrollPositionID: String?
     @State private var serverScrollFraction: Double? = nil
+    @State private var lastPushedProgressMilestone: Int = -1
 
     private var theme: ReaderTheme {
         if colorThemeRaw.isEmpty {
@@ -411,11 +412,23 @@ struct HTMLReaderView: View {
                 highWaterIndex = flatIndex
                 let fraction = Double(flatIndex) / Double(max(totalParas - 1, 1))
                 scrollProgress = fraction
-                // Log every ~10% milestone
+                // Push progress to server at each new 10% milestone
                 let prevPct = Int((fraction - (1.0 / Double(max(totalParas - 1, 1)))) * 10)
                 let newPct  = Int(fraction * 10)
                 if newPct > prevPct {
                     print("[HTML] Progress: paragraph \(flatIndex)/\(totalParas), fraction=\(String(format: "%.3f", fraction)) (\(Int(fraction * 100))%)")
+                }
+                if newPct > prevPct && newPct > lastPushedProgressMilestone {
+                    lastPushedProgressMilestone = newPct
+                    let storyID = story.id
+                    let progress = ReadingProgress(
+                        currentChapter: nil,
+                        cfi: nil,
+                        percentage: fraction,
+                        isCompleted: fraction >= 0.99,
+                        lastReadAt: nil
+                    )
+                    Task { try? await appState.makeAPIClient().saveProgress(storyID: storyID, progress: progress) }
                 }
                 if let localStory {
                     localStory.readingProgressScrollY = fraction
