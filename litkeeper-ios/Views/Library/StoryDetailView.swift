@@ -22,7 +22,7 @@ struct StoryDetailView: View {
     }
 
     private var isDownloaded: Bool { localStory != nil }
-    private var canReadEPUB: Bool { story.hasEPUB }
+    private var canReadEPUB: Bool { localStory?.hasEPUB == true }
     private var canReadHTML: Bool { story.hasHTML }
 
     var body: some View {

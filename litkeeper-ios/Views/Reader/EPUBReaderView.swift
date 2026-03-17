@@ -1,6 +1,9 @@
 import SwiftUI
-import WebKit
 import SwiftData
+import WebKit
+import ReadiumShared
+import ReadiumStreamer
+import ReadiumNavigator
 
 struct EPUBReaderView: View {
     let story: Story
@@ -13,31 +16,36 @@ struct EPUBReaderView: View {
     @State private var showControls = true
     @State private var chapterTitle = ""
     @State private var readingFraction: Double = 0
+    @State private var publication: Publication?
+    @State private var loadError: String?
+    @State private var isContentReady = false
 
     var body: some View {
         ZStack(alignment: .top) {
-            EPUBWebView(
-                storyID: story.id,
-                filenameBase: story.filenameBase,
-                initialCFI: localStory?.readingProgressCFI,
-                serverURL: appState.serverURL,
-                token: appState.apiToken,
-                onRelocate: { fraction, title in
-                    print("[EPUB] onRelocate: fraction=\(String(format: "%.4f", fraction)) (\(Int(fraction * 100))%), chapter=\(title ?? "nil")")
-                    readingFraction = fraction
-                    chapterTitle = title ?? ""
-                    if let localStory {
-                        localStory.readingProgressPercentage = fraction * 100
-                        try? modelContext.save()
+            if let publication {
+                ReadiumEPUBView(
+                    publication: publication,
+                    initialLocatorJSON: localStory?.readingProgressLocator,
+                    onLocatorChange: { locator in
+                        if !isContentReady {
+                            withAnimation(.easeOut(duration: 0.4)) { isContentReady = true }
+                        }
+                        readingFraction = locator.locations.totalProgression ?? readingFraction
+                        chapterTitle = locator.title ?? ""
+                        if let localStory {
+                            localStory.readingProgressLocator = locator.jsonString
+                            localStory.readingProgressPercentage = readingFraction * 100
+                            try? modelContext.save()
+                        }
+                    },
+                    onTap: {
+                        withAnimation(.easeInOut(duration: 0.2)) { showControls.toggle() }
                     }
-                },
-                onTap: {
-                    withAnimation(.easeInOut(duration: 0.2)) { showControls.toggle() }
-                }
-            )
-            .ignoresSafeArea()
+                )
+                .ignoresSafeArea()
+            }
 
-            if showControls {
+            if isContentReady && showControls {
                 VStack(spacing: 0) {
                     HStack {
                         Button { dismiss() } label: {
@@ -70,124 +78,195 @@ struct EPUBReaderView: View {
                 }
                 .transition(.opacity)
             }
+
+            if let loadError {
+                ZStack {
+                    Color(.systemBackground).ignoresSafeArea()
+                    VStack(spacing: 12) {
+                        Image(systemName: "exclamationmark.triangle")
+                            .font(.largeTitle)
+                            .foregroundStyle(.secondary)
+                        Text(loadError)
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                            .multilineTextAlignment(.center)
+                            .padding(.horizontal)
+                        Button("Dismiss") { dismiss() }
+                            .padding(.top, 4)
+                    }
+                }
+            } else if !isContentReady {
+                EPUBLoadingOverlay(story: story, localStory: localStory, onDismiss: { dismiss() })
+                    .ignoresSafeArea()
+                    .transition(.opacity)
+            }
         }
-        .statusBarHidden(!showControls)
+        .statusBarHidden(isContentReady && !showControls)
         .onAppear {
-            let localPct = (localStory?.readingProgressPercentage ?? 0) / 100
-            print("[EPUB] onAppear: restoring readingFraction=\(String(format: "%.4f", localPct)) from localStory.readingProgressPercentage=\(localStory?.readingProgressPercentage ?? 0)")
-            readingFraction = localPct
+            readingFraction = (localStory?.readingProgressPercentage ?? 0) / 100
+            Task { await openPublication() }
         }
         .onDisappear {
-            guard readingFraction > 0 else {
-                print("[EPUB] onDisappear: readingFraction=0, skipping server save")
-                return
-            }
-            let fraction = readingFraction
-            let storyID = story.id
-            print("[EPUB] onDisappear: saving fraction=\(String(format: "%.4f", fraction)) (\(Int(fraction * 100))%) to server for story \(storyID)")
+            guard readingFraction > 0 else { return }
             let progress = ReadingProgress(
                 currentChapter: nil,
-                cfi: localStory?.readingProgressCFI,
-                percentage: fraction,
-                isCompleted: fraction >= 0.99,
+                cfi: nil,
+                percentage: readingFraction,
+                isCompleted: readingFraction >= 0.99,
                 lastReadAt: nil
             )
+            let storyID = story.id
             Task { try? await appState.makeAPIClient().saveProgress(storyID: storyID, progress: progress) }
+        }
+    }
+
+    private func openPublication() async {
+        guard let localStory, localStory.hasEPUB else {
+            loadError = "EPUB not downloaded. Please download the story first."
+            return
+        }
+        let epubURL = DownloadManager.shared.localEPUBURL(filenameBase: localStory.filenameBase)
+        guard let fileURL = FileURL(url: epubURL) else {
+            loadError = "Invalid EPUB file path."
+            return
+        }
+
+        let httpClient = DefaultHTTPClient()
+        let assetRetriever = AssetRetriever(httpClient: httpClient)
+        let opener = PublicationOpener(parser: EPUBParser())
+
+        do {
+            let asset = try await assetRetriever.retrieve(url: fileURL).get()
+            publication = try await opener.open(asset: asset, allowUserInteraction: false).get()
+        } catch {
+            loadError = "Could not open EPUB: \(error.localizedDescription)"
         }
     }
 }
 
-// MARK: - UIViewRepresentable
+// MARK: - Loading Overlay
 
-struct EPUBWebView: UIViewRepresentable {
-    let storyID: Int
-    let filenameBase: String
-    let initialCFI: String?
-    let serverURL: String
-    let token: String
-    var onRelocate: (Double, String?) -> Void
+private struct EPUBLoadingOverlay: View {
+    let story: Story
+    let localStory: LocalStory?
+    let onDismiss: () -> Void
+
+    private var coverURL: URL? {
+        guard let filename = localStory?.coverFilename else { return nil }
+        let url = DownloadManager.shared.localCoverURL(filename: filename)
+        return FileManager.default.fileExists(atPath: url.path) ? url : nil
+    }
+
+    private var resumeText: String? {
+        guard let pct = localStory?.readingProgressPercentage, pct > 1 else { return nil }
+        return "Resuming at \(Int(pct))%"
+    }
+
+    var body: some View {
+        ZStack {
+            CoverImageView(url: coverURL, title: story.title, author: story.author)
+                .blur(radius: 60)
+                .overlay(.black.opacity(0.55))
+                .ignoresSafeArea()
+
+            VStack(spacing: 28) {
+                CoverImageView(url: coverURL, title: story.title, author: story.author)
+                    .frame(width: 140, height: 200)
+                    .clipShape(RoundedRectangle(cornerRadius: 10))
+                    .shadow(color: .black.opacity(0.5), radius: 24, y: 12)
+
+                VStack(spacing: 6) {
+                    Text(story.title)
+                        .font(.headline)
+                        .foregroundStyle(.white)
+                        .multilineTextAlignment(.center)
+                    if let resumeText {
+                        Text(resumeText)
+                            .font(.subheadline)
+                            .foregroundStyle(.white.opacity(0.6))
+                    }
+                }
+                .padding(.horizontal, 40)
+
+                ProgressView()
+                    .tint(.white)
+            }
+
+            VStack {
+                HStack {
+                    Button(action: onDismiss) {
+                        Image(systemName: "xmark")
+                            .font(.title3)
+                            .padding(10)
+                            .background(Circle().fill(.ultraThinMaterial))
+                    }
+                    Spacer()
+                }
+                .padding()
+                Spacer()
+            }
+        }
+    }
+}
+
+// MARK: - UIViewControllerRepresentable
+
+struct ReadiumEPUBView: UIViewControllerRepresentable {
+    let publication: Publication
+    let initialLocatorJSON: String?
+    var onLocatorChange: (Locator) -> Void
     var onTap: () -> Void
 
     func makeCoordinator() -> Coordinator {
-        Coordinator(storyID: storyID, filenameBase: filenameBase, initialCFI: initialCFI,
-                    onRelocate: onRelocate, onTap: onTap)
+        Coordinator(onLocatorChange: onLocatorChange, onTap: onTap)
     }
 
-    func makeUIView(context: Context) -> WKWebView {
-        let config = WKWebViewConfiguration()
-        config.userContentController.add(context.coordinator, name: "progress")
-        config.userContentController.add(context.coordinator, name: "tap")
-
-        let base = serverURL.hasSuffix("/") ? String(serverURL.dropLast()) : serverURL
-        let handler = EPUBSchemeHandler(
-            serverBase: URL(string: base),
-            token: token.isEmpty ? nil : token
+    func makeUIViewController(context: Context) -> EPUBNavigatorViewController {
+        let initialLocator = initialLocatorJSON.flatMap { try? Locator(jsonString: $0) }
+        var config = EPUBNavigatorViewController.Configuration()
+        config.preloadPreviousPositionCount = 0
+        config.preloadNextPositionCount = 1
+        let navigator = try! EPUBNavigatorViewController(
+            publication: publication,
+            initialLocation: initialLocator,
+            config: config
         )
-        config.setURLSchemeHandler(handler, forURLScheme: "epub-local")
-        config.allowsInlineMediaPlayback = true
-        config.mediaTypesRequiringUserActionForPlayback = []
+        navigator.delegate = context.coordinator
 
-        let webView = WKWebView(frame: .zero, configuration: config)
-        webView.scrollView.isScrollEnabled = false
-        webView.isOpaque = false
-        webView.backgroundColor = .clear
-        webView.navigationDelegate = context.coordinator
-        context.coordinator.webView = webView
+        let tap = UITapGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handleTap(_:)))
+        tap.cancelsTouchesInView = false
+        navigator.view.addGestureRecognizer(tap)
 
-        webView.load(URLRequest(url: URL(string: "epub-local://app/epub-reader.html")!))
-        return webView
+        return navigator
     }
 
-    func updateUIView(_ webView: WKWebView, context: Context) {
-        // Keep coordinator closures current so state updates (showControls toggle, etc.)
-        // don't cause onRelocate to capture stale @State bindings.
-        context.coordinator.onRelocate = onRelocate
+    func updateUIViewController(_ uiViewController: EPUBNavigatorViewController, context: Context) {
+        context.coordinator.onLocatorChange = onLocatorChange
         context.coordinator.onTap = onTap
     }
 
-    // MARK: Coordinator
-
-    final class Coordinator: NSObject, WKScriptMessageHandler, WKNavigationDelegate {
-        let storyID: Int
-        let filenameBase: String
-        let initialCFI: String?
-        var onRelocate: (Double, String?) -> Void
+    @MainActor
+    final class Coordinator: NSObject, EPUBNavigatorDelegate {
+        var onLocatorChange: (Locator) -> Void
         var onTap: () -> Void
-        weak var webView: WKWebView?
 
-        init(storyID: Int, filenameBase: String, initialCFI: String?,
-             onRelocate: @escaping (Double, String?) -> Void,
-             onTap: @escaping () -> Void) {
-            self.storyID = storyID
-            self.filenameBase = filenameBase
-            self.initialCFI = initialCFI
-            self.onRelocate = onRelocate
+        init(onLocatorChange: @escaping (Locator) -> Void, onTap: @escaping () -> Void) {
+            self.onLocatorChange = onLocatorChange
             self.onTap = onTap
         }
 
-        func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
-            switch message.name {
-            case "progress":
-                guard let body = message.body as? [String: Any] else { return }
-                let fraction = body["fraction"] as? Double ?? 0
-                let title = body["chapterTitle"] as? String
-                DispatchQueue.main.async { self.onRelocate(fraction, title) }
-            case "tap":
-                DispatchQueue.main.async { self.onTap() }
-            default: break
-            }
+        func navigator(_ navigator: Navigator, locationDidChange locator: Locator) {
+            onLocatorChange(locator)
         }
 
-        func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
-            let cfi = initialCFI ?? ""
-            let escapedCFI = cfi.replacingOccurrences(of: "'", with: "\\'")
-            let js = """
-            window.postMessage({
-              type: 'open',
-              payload: { url: 'epub-local://epub/\(storyID)/\(filenameBase)', cfi: '\(escapedCFI)' }
-            }, '*');
-            """
-            webView.evaluateJavaScript(js)
+        func navigator(_ navigator: Navigator, presentError error: NavigatorError) {}
+
+        @objc func handleTap(_ gesture: UITapGestureRecognizer) {
+            guard let view = gesture.view else { return }
+            let loc = gesture.location(in: view)
+            let inCenter = loc.x > view.bounds.width * 0.2 && loc.x < view.bounds.width * 0.8
+                        && loc.y > view.bounds.height * 0.2 && loc.y < view.bounds.height * 0.8
+            if inCenter { onTap() }
         }
     }
 }

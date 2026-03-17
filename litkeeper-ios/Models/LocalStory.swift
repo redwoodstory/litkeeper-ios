@@ -14,6 +14,7 @@ final class LocalStory {
     var downloadedAt: Date
     var lastReadAt: Date?
     var readingProgressCFI: String?
+    var readingProgressLocator: String?
     var readingProgressPercentage: Double?
     var readingProgressScrollY: Double?
 

@@ -41,6 +41,7 @@ struct RootView: View {
             QueueView()
                 .tabItem { Label("History", systemImage: "clock") }
         }
+        .task { WebViewPrewarmer.shared.prewarm() }
         .fullScreenCover(isPresented: Binding(
             get: { appState.isLocked },
             set: { _ in }
