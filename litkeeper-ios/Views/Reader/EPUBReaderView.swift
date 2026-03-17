@@ -10,28 +10,85 @@ struct EPUBReaderView: View {
     let localStory: LocalStory?
     let appState: AppState
 
-    @Environment(\.modelContext) private var modelContext
-    @Environment(\.dismiss) private var dismiss
+    @Environment(\.modelContext)  private var modelContext
+    @Environment(\.dismiss)       private var dismiss
+    @Environment(\.colorScheme)   private var systemColorScheme
 
     @State private var showControls = true
-    @State private var chapterTitle = ""
+    @State private var showSettings = false
     @State private var readingFraction: Double = 0
     @State private var publication: Publication?
     @State private var loadError: String?
     @State private var isContentReady = false
 
+    @AppStorage("reader.fontSize")    private var fontSize:      Double = 17
+    @AppStorage("reader.lineSpacing") private var lineSpacing:   Double = 1.58
+    @AppStorage("reader.hPadding")    private var hPadding:      Double = 20
+    @AppStorage("reader.fontKey")     private var fontKey:       String = "system"
+    @AppStorage("reader.colorTheme")  private var colorThemeRaw: String = ""
+
+    private var theme: ReaderTheme {
+        if colorThemeRaw.isEmpty {
+            return systemColorScheme == .dark ? .darkNavy : .beige
+        }
+        return ReaderTheme(rawValue: colorThemeRaw) ?? .beige
+    }
+
+    private var epubPreferences: EPUBPreferences {
+        let readiumTheme: ReadiumNavigator.Theme
+        let bgColor: ReadiumNavigator.Color?
+        let fgColor: ReadiumNavigator.Color?
+
+        switch theme {
+        case .white:
+            readiumTheme = .light;  bgColor = nil; fgColor = nil
+        case .beige:
+            readiumTheme = .sepia;  bgColor = nil; fgColor = nil
+        case .grey:
+            readiumTheme = .dark;   bgColor = nil; fgColor = nil
+        case .pureBlack:
+            readiumTheme = .dark
+            bgColor = ReadiumNavigator.Color(hex: "000000")
+            fgColor = ReadiumNavigator.Color(hex: "f0f0f0")
+        case .darkNavy:
+            readiumTheme = .dark
+            bgColor = ReadiumNavigator.Color(hex: "0f1419")
+            fgColor = ReadiumNavigator.Color(hex: "cccccc")
+        }
+
+        let fontFamily: FontFamily
+        switch fontKey {
+        case "newYork":     fontFamily = FontFamily(rawValue: "New York")
+        case "georgia":     fontFamily = .georgia
+        case "baskerville": fontFamily = FontFamily(rawValue: "Baskerville")
+        case "didot":       fontFamily = FontFamily(rawValue: "Didot")
+        default:            fontFamily = FontFamily(rawValue: "-apple-system")
+        }
+
+        return EPUBPreferences(
+            backgroundColor: bgColor,
+            fontFamily: fontFamily,
+            fontSize: fontSize / 17.0,
+            lineHeight: lineSpacing,
+            pageMargins: hPadding / 20.0,
+            publisherStyles: false,
+            textColor: fgColor,
+            theme: readiumTheme
+        )
+    }
+
     var body: some View {
-        ZStack(alignment: .top) {
+        ZStack {
             if let publication {
                 ReadiumEPUBView(
                     publication: publication,
                     initialLocatorJSON: localStory?.readingProgressLocator,
+                    preferences: epubPreferences,
                     onLocatorChange: { locator in
                         if !isContentReady {
                             withAnimation(.easeOut(duration: 0.4)) { isContentReady = true }
                         }
                         readingFraction = locator.locations.totalProgression ?? readingFraction
-                        chapterTitle = locator.title ?? ""
                         if let localStory {
                             localStory.readingProgressLocator = locator.jsonString
                             localStory.readingProgressPercentage = readingFraction * 100
@@ -39,44 +96,21 @@ struct EPUBReaderView: View {
                         }
                     },
                     onTap: {
-                        withAnimation(.easeInOut(duration: 0.2)) { showControls.toggle() }
+                        withAnimation(.easeInOut(duration: 0.25)) { showControls.toggle() }
                     }
                 )
                 .ignoresSafeArea()
-            }
-
-            if isContentReady && showControls {
-                VStack(spacing: 0) {
-                    HStack {
-                        Button { dismiss() } label: {
-                            Image(systemName: "xmark")
-                                .font(.title3)
-                                .padding(10)
-                                .background(Circle().fill(.regularMaterial))
-                        }
-                        Spacer()
-                        if !chapterTitle.isEmpty {
-                            Text(chapterTitle)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                                .lineLimit(1)
-                        }
-                        Spacer()
-                        Text("\(Int(readingFraction * 100))%")
-                            .font(.caption.monospacedDigit())
-                            .foregroundStyle(.secondary)
+                .overlay(alignment: .top) {
+                    if isContentReady && showControls {
+                        headerBar.transition(.move(edge: .top).combined(with: .opacity))
                     }
-                    .padding()
-                    .background(.regularMaterial)
-
-                    Spacer()
-
-                    ProgressView(value: readingFraction)
-                        .padding(.horizontal)
-                        .padding(.bottom, 8)
-                        .background(.regularMaterial)
                 }
-                .transition(.opacity)
+                .overlay(alignment: .bottom) {
+                    if isContentReady && showControls {
+                        footerBar.transition(.move(edge: .bottom).combined(with: .opacity))
+                    }
+                }
+                .animation(.easeInOut(duration: 0.25), value: showControls)
             }
 
             if let loadError {
@@ -102,7 +136,21 @@ struct EPUBReaderView: View {
             }
         }
         .statusBarHidden(isContentReady && !showControls)
+        .sheet(isPresented: $showSettings) {
+            ReaderSettingsView(
+                fontSize: $fontSize,
+                lineSpacing: $lineSpacing,
+                hPadding: $hPadding,
+                fontKey: $fontKey,
+                colorThemeRaw: $colorThemeRaw
+            )
+            .presentationDetents([.large])
+            .presentationDragIndicator(.visible)
+        }
         .onAppear {
+            if colorThemeRaw.isEmpty {
+                colorThemeRaw = (systemColorScheme == .dark ? ReaderTheme.darkNavy : .beige).rawValue
+            }
             readingFraction = (localStory?.readingProgressPercentage ?? 0) / 100
             Task { await openPublication() }
         }
@@ -119,6 +167,58 @@ struct EPUBReaderView: View {
             Task { try? await appState.makeAPIClient().saveProgress(storyID: storyID, progress: progress) }
         }
     }
+
+    // MARK: - Header bar (mirrors HTMLReaderView.headerBar)
+
+    private var headerBar: some View {
+        HStack {
+            Button { dismiss() } label: {
+                Image(systemName: "xmark")
+                    .font(.title3)
+                    .padding(10)
+                    .background(Circle().fill(.regularMaterial))
+            }
+            Spacer()
+            Text(story.title)
+                .font(.subheadline.weight(.medium))
+                .foregroundStyle(theme.text)
+                .lineLimit(1)
+                .padding(.horizontal, 8)
+            Spacer()
+            Button { showSettings = true } label: {
+                Image(systemName: "textformat.size")
+                    .font(.title3)
+                    .padding(10)
+                    .background(Circle().fill(.regularMaterial))
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
+        .background(theme.card.opacity(0.96))
+        .overlay(alignment: .bottom) {
+            Rectangle().fill(theme.border).frame(height: 0.5)
+        }
+    }
+
+    // MARK: - Footer bar (mirrors HTMLReaderView.footerBar)
+
+    private var footerBar: some View {
+        VStack(spacing: 4) {
+            ProgressView(value: readingFraction)
+            Text("\(Int(readingFraction * 100))%")
+                .font(.caption2.monospacedDigit())
+                .foregroundStyle(theme.secondary)
+        }
+        .padding(.horizontal, 16)
+        .padding(.top, 10)
+        .padding(.bottom, 12)
+        .background(theme.card.opacity(0.96))
+        .overlay(alignment: .top) {
+            Rectangle().fill(theme.border).frame(height: 0.5)
+        }
+    }
+
+    // MARK: - Publication opener
 
     private func openPublication() async {
         guard let localStory, localStory.hasEPUB else {
@@ -214,6 +314,7 @@ private struct EPUBLoadingOverlay: View {
 struct ReadiumEPUBView: UIViewControllerRepresentable {
     let publication: Publication
     let initialLocatorJSON: String?
+    var preferences: EPUBPreferences
     var onLocatorChange: (Locator) -> Void
     var onTap: () -> Void
 
@@ -226,23 +327,20 @@ struct ReadiumEPUBView: UIViewControllerRepresentable {
         var config = EPUBNavigatorViewController.Configuration()
         config.preloadPreviousPositionCount = 0
         config.preloadNextPositionCount = 1
+        config.preferences = preferences
         let navigator = try! EPUBNavigatorViewController(
             publication: publication,
             initialLocation: initialLocator,
             config: config
         )
         navigator.delegate = context.coordinator
-
-        let tap = UITapGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handleTap(_:)))
-        tap.cancelsTouchesInView = false
-        navigator.view.addGestureRecognizer(tap)
-
         return navigator
     }
 
     func updateUIViewController(_ uiViewController: EPUBNavigatorViewController, context: Context) {
         context.coordinator.onLocatorChange = onLocatorChange
         context.coordinator.onTap = onTap
+        uiViewController.submitPreferences(preferences)
     }
 
     @MainActor
@@ -261,12 +359,8 @@ struct ReadiumEPUBView: UIViewControllerRepresentable {
 
         func navigator(_ navigator: Navigator, presentError error: NavigatorError) {}
 
-        @objc func handleTap(_ gesture: UITapGestureRecognizer) {
-            guard let view = gesture.view else { return }
-            let loc = gesture.location(in: view)
-            let inCenter = loc.x > view.bounds.width * 0.2 && loc.x < view.bounds.width * 0.8
-                        && loc.y > view.bounds.height * 0.2 && loc.y < view.bounds.height * 0.8
-            if inCenter { onTap() }
+        func navigator(_ navigator: VisualNavigator, didTapAt point: CGPoint) {
+            onTap()
         }
     }
 }

@@ -12,6 +12,7 @@ struct StoryDetailView: View {
     @State private var downloadError: String? = nil
     @State private var currentRating: Int?
     @State private var showDeleteConfirm = false
+    @State private var showResetProgressConfirm = false
     @State private var showEPUBReader = false
     @State private var showHTMLReader = false
     @State private var isSyncing = false
@@ -37,6 +38,11 @@ struct StoryDetailView: View {
                 // Read buttons
                 readSection
 
+                // Reading progress
+                if let local = localStory, let pct = local.readingProgressPercentage, pct > 0 {
+                    progressSection(local: local, percentage: pct)
+                }
+
                 // Stats row
                 statsSection
 
@@ -61,6 +67,14 @@ struct StoryDetailView: View {
                     Button("Done") { dismiss() }
                         .fontWeight(.semibold)
                 }
+            }
+            .alert("Reset Progress?", isPresented: $showResetProgressConfirm) {
+                Button("Cancel", role: .cancel) { }
+                Button("Reset", role: .destructive) {
+                    Task { await resetProgress() }
+                }
+            } message: {
+                Text("This will reset your reading position to the beginning.")
             }
             .alert("Delete Story?", isPresented: $showDeleteConfirm) {
                 Button("Cancel", role: .cancel) { }
@@ -293,6 +307,30 @@ struct StoryDetailView: View {
         }
     }
 
+    // MARK: - Progress section
+
+    @ViewBuilder
+    private func progressSection(local: LocalStory, percentage: Double) -> some View {
+        Section("Reading Progress") {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    Text("\(Int(percentage))% complete")
+                        .font(.subheadline)
+                        .foregroundStyle(.primary)
+                    Spacer()
+                    Button("Reset") {
+                        showResetProgressConfirm = true
+                    }
+                    .font(.subheadline)
+                    .foregroundStyle(.red)
+                }
+                ProgressView(value: percentage / 100)
+                    .tint(.accentColor)
+            }
+            .padding(.vertical, 4)
+        }
+    }
+
     // MARK: - Utility section
 
     @ViewBuilder
@@ -333,6 +371,17 @@ struct StoryDetailView: View {
         let filename = story.cover ?? "\(story.filenameBase).jpg"
         let base = appState.serverURL.hasSuffix("/") ? String(appState.serverURL.dropLast()) : appState.serverURL
         return URL(string: "\(base)/api/cover/\(filename)")
+    }
+
+    private func resetProgress() async {
+        guard let local = localStory else { return }
+        local.readingProgressPercentage = nil
+        local.readingProgressCFI = nil
+        local.readingProgressLocator = nil
+        local.readingProgressScrollY = nil
+        try? modelContext.save()
+        let zeroed = ReadingProgress(currentChapter: nil, cfi: nil, percentage: 0, isCompleted: false, lastReadAt: nil)
+        try? await appState.makeAPIClient().saveProgress(storyID: story.id, progress: zeroed)
     }
 
     private func startDownload() {
