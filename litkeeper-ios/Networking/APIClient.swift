@@ -3,15 +3,23 @@ import Foundation
 actor APIClient {
     private let baseURL: URL
     private let token: String
+    private let proxyAPIKey: String?
+    private let proxyHeaderName: String
+    private let proxyAPIKey2: String?
+    private let proxyHeaderName2: String
     private let session: URLSession
 
-    init(baseURLString: String, token: String) {
+    init(baseURLString: String, token: String, proxyAPIKey: String? = nil, proxyHeaderName: String = "X-API-Key", proxyAPIKey2: String? = nil, proxyHeaderName2: String = "") {
         // Normalize: strip trailing slash
         let cleaned = baseURLString.hasSuffix("/")
             ? String(baseURLString.dropLast())
             : baseURLString
         self.baseURL = URL(string: cleaned) ?? URL(string: "http://localhost:5017")!
         self.token = token
+        self.proxyAPIKey = proxyAPIKey
+        self.proxyHeaderName = proxyHeaderName
+        self.proxyAPIKey2 = proxyAPIKey2
+        self.proxyHeaderName2 = proxyHeaderName2
         let config = URLSessionConfiguration.default
         config.timeoutIntervalForRequest = 30
         self.session = URLSession(configuration: config)
@@ -65,7 +73,7 @@ actor APIClient {
         if let items = grouped.pending { all += items }
         if let items = grouped.completed { all += Array(items.prefix(20)) }
         if let items = grouped.failed { all += items }
-        return all
+        return all.sorted { ($0.createdAt ?? "") > ($1.createdAt ?? "") }
     }
 
     func fetchQueueStats() async throws -> QueueStats {
@@ -146,6 +154,12 @@ actor APIClient {
         req.httpMethod = method
         req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         req.setValue("application/json", forHTTPHeaderField: "Accept")
+        if let key = proxyAPIKey {
+            req.setValue(key, forHTTPHeaderField: proxyHeaderName)
+        }
+        if let key2 = proxyAPIKey2, !proxyHeaderName2.isEmpty {
+            req.setValue(key2, forHTTPHeaderField: proxyHeaderName2)
+        }
         return req
     }
 

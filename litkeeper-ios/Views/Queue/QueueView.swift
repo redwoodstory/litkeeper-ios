@@ -23,7 +23,6 @@ struct QueueView: View {
                     )
                 } else {
                     List {
-                        // Stats row
                         if let stats = viewModel.stats {
                             Section {
                                 HStack(spacing: 0) {
@@ -39,36 +38,8 @@ struct QueueView: View {
                             }
                         }
 
-                        // Processing
-                        let processing = viewModel.items.filter { $0.status == .processing }
-                        if !processing.isEmpty {
-                            Section("Downloading") {
-                                ForEach(processing) { item in QueueItemRow(item: item) }
-                            }
-                        }
-
-                        // Pending
-                        let pending = viewModel.items.filter { $0.status == .pending }
-                        if !pending.isEmpty {
-                            Section("Queued") {
-                                ForEach(pending) { item in QueueItemRow(item: item) }
-                            }
-                        }
-
-                        // Failed
-                        let failed = viewModel.items.filter { $0.status == .failed }
-                        if !failed.isEmpty {
-                            Section("Failed") {
-                                ForEach(failed) { item in QueueItemRow(item: item) }
-                            }
-                        }
-
-                        // Completed (last 20)
-                        let completed = viewModel.items.filter { $0.status == .completed }
-                        if !completed.isEmpty {
-                            Section("Completed") {
-                                ForEach(completed) { item in QueueItemRow(item: item) }
-                            }
+                        Section {
+                            ForEach(viewModel.items) { item in QueueItemRow(item: item) }
                         }
                     }
                     .refreshable {

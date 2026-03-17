@@ -5,6 +5,10 @@ struct ServerSettingsView: View {
 
     @State private var urlDraft: String = ""
     @State private var tokenDraft: String = ""
+    @State private var proxyKeyDraft: String = ""
+    @State private var proxyHeaderDraft: String = ""
+    @State private var proxyKeyDraft2: String = ""
+    @State private var proxyHeaderDraft2: String = ""
     @State private var testResult: TestResult? = nil
     @State private var isTesting = false
     @State private var showDisconnectConfirm = false
@@ -35,6 +39,38 @@ struct ServerSettingsView: View {
                 Text("Connection")
             } footer: {
                 Text("Set LITKEEPER_API_TOKEN in your server's .env file.")
+                    .font(.caption)
+            }
+
+            Section {
+                LabeledContent("Header 1 Name") {
+                    TextField("X-API-Key", text: $proxyHeaderDraft)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .multilineTextAlignment(.trailing)
+                }
+                LabeledContent("Header 1 Value") {
+                    SecureField("Leave blank for LAN access", text: $proxyKeyDraft)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .multilineTextAlignment(.trailing)
+                }
+                LabeledContent("Header 2 Name") {
+                    TextField("Optional second header", text: $proxyHeaderDraft2)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .multilineTextAlignment(.trailing)
+                }
+                LabeledContent("Header 2 Value") {
+                    SecureField("Optional", text: $proxyKeyDraft2)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .multilineTextAlignment(.trailing)
+                }
+            } header: {
+                Text("External Proxy")
+            } footer: {
+                Text("Required when accessing via a reverse proxy (e.g. Pangolin) from outside your LAN. For Pangolin, set Header 1 to P-Access-Token-Id and Header 2 to P-Access-Token. Leave blank for direct LAN access.")
                     .font(.caption)
             }
 
@@ -76,6 +112,10 @@ struct ServerSettingsView: View {
         .onAppear {
             urlDraft = appState.serverURL
             tokenDraft = appState.apiToken
+            proxyKeyDraft = appState.proxyAPIKey
+            proxyHeaderDraft = appState.proxyHeaderName
+            proxyKeyDraft2 = appState.proxyAPIKey2
+            proxyHeaderDraft2 = appState.proxyHeaderName2
         }
         .onChange(of: urlDraft) { _, new in
             appState.serverURL = new
@@ -83,6 +123,22 @@ struct ServerSettingsView: View {
         }
         .onChange(of: tokenDraft) { _, new in
             appState.apiToken = new
+            testResult = nil
+        }
+        .onChange(of: proxyKeyDraft) { _, new in
+            appState.proxyAPIKey = new
+            testResult = nil
+        }
+        .onChange(of: proxyHeaderDraft) { _, new in
+            appState.proxyHeaderName = new.isEmpty ? "X-API-Key" : new
+            testResult = nil
+        }
+        .onChange(of: proxyKeyDraft2) { _, new in
+            appState.proxyAPIKey2 = new
+            testResult = nil
+        }
+        .onChange(of: proxyHeaderDraft2) { _, new in
+            appState.proxyHeaderName2 = new
             testResult = nil
         }
         .confirmationDialog(
@@ -93,8 +149,12 @@ struct ServerSettingsView: View {
             Button("Disconnect", role: .destructive) {
                 appState.serverURL = ""
                 appState.apiToken = ""
+                appState.proxyAPIKey = ""
+                appState.proxyAPIKey2 = ""
                 urlDraft = ""
                 tokenDraft = ""
+                proxyKeyDraft = ""
+                proxyKeyDraft2 = ""
                 testResult = nil
             }
         } message: {
