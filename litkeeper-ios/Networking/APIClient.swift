@@ -128,6 +128,13 @@ actor APIClient {
         })
     }
 
+    func fetchBulkContent(storyIDs: [Int]) async -> BulkContentResponse? {
+        guard !storyIDs.isEmpty else { return nil }
+        let ids = storyIDs.map(String.init).joined(separator: ",")
+        guard let data = try? await get("/api/download/bulk?ids=\(ids)") else { return nil }
+        return try? decode(BulkContentResponse.self, from: data)
+    }
+
     func saveProgress(storyID: Int, progress: ReadingProgress) async throws {
         let encoder = JSONEncoder()
         encoder.keyEncodingStrategy = .convertToSnakeCase
@@ -290,6 +297,30 @@ actor APIClient {
             throw APIError.decodingError(error)
         }
     }
+}
+
+// MARK: - Bulk Content Response
+
+struct BulkContentStory: Codable {
+    let epub: String?
+    let epubFilename: String?
+    let html: String?
+    let htmlFilename: String?
+    let cover: String?
+    let coverFilename: String?
+
+    enum CodingKeys: String, CodingKey {
+        case epub
+        case epubFilename = "epub_filename"
+        case html
+        case htmlFilename = "html_filename"
+        case cover
+        case coverFilename = "cover_filename"
+    }
+}
+
+struct BulkContentResponse: Codable {
+    let stories: [String: BulkContentStory]
 }
 
 // Preserves custom auth headers when URLSession follows HTTP redirects.

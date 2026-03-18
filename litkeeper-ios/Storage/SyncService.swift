@@ -100,42 +100,87 @@ final class SyncService {
 
         let localByID = Dictionary(uniqueKeysWithValues: localStories.map { ($0.storyID, $0) })
 
-        for story in stories {
+        // Collect stories that need syncing
+        let storiesToSync = stories.filter { story in
             let local = localByID[story.id]
+            guard local != nil else { return true }
+            guard let updatedAtStr = story.updatedAt,
+                  let serverDate = Self.isoFormatter.date(from: updatedAtStr) else { return false }
+            return local?.serverUpdatedAt.map { serverDate > $0 } ?? true
+        }
 
-            var needsSync = false
-            if local == nil {
-                needsSync = true
-            } else if let updatedAtStr = story.updatedAt,
-                      let serverDate = Self.isoFormatter.date(from: updatedAtStr) {
-                needsSync = local?.serverUpdatedAt.map { serverDate > $0 } ?? true
+        guard !storiesToSync.isEmpty else { return }
+
+        let ptId = pangolinTokenId.flatMap { $0.isEmpty ? nil : $0 }
+        let ptTok = pangolinToken.flatMap { $0.isEmpty ? nil : $0 }
+        let client = APIClient(baseURLString: serverURL, token: token, pangolinTokenId: ptId, pangolinToken: ptTok)
+
+        // Process in batches of 5 — keeps each request small and avoids CrowdSec triggers
+        let batches = stride(from: 0, to: storiesToSync.count, by: 5).map {
+            Array(storiesToSync[$0..<min($0 + 5, storiesToSync.count)])
+        }
+
+        for (index, batch) in batches.enumerated() {
+            if index > 0 {
+                try? await Task.sleep(nanoseconds: 1_000_000_000) // 1s between batches
             }
 
-            guard needsSync else { continue }
+            let ids = batch.map { $0.id }
+            guard let response = await client.fetchBulkContent(storyIDs: ids) else {
+                print("[LK-Sync] ✗ Bulk content fetch failed for batch \(index + 1)/\(batches.count)")
+                continue
+            }
 
-            do {
-                try await DownloadManager.shared.downloadStory(
-                    story: story,
-                    serverBaseURL: serverURL,
-                    token: token,
-                    pangolinTokenId: pangolinTokenId,
-                    pangolinToken: pangolinToken,
-                    modelContext: modelContext,
-                    onProgress: { _, _ in }
+            let dm = DownloadManager.shared
+            for story in batch {
+                guard let content = response.stories[String(story.id)] else { continue }
+
+                var epubPath: String? = nil
+                var htmlPath: String? = nil
+                var coverPath: String? = nil
+
+                if let b64 = content.epub, let filename = content.epubFilename,
+                   let data = Data(base64Encoded: b64) {
+                    try? data.write(to: dm.localEPUBURL(filenameBase: story.filenameBase))
+                    epubPath = filename
+                }
+
+                if let b64 = content.html, let filename = content.htmlFilename,
+                   let data = Data(base64Encoded: b64) {
+                    try? data.write(to: dm.localHTMLURL(filenameBase: story.filenameBase))
+                    htmlPath = filename
+                }
+
+                if let b64 = content.cover, let filename = content.coverFilename,
+                   let data = Data(base64Encoded: b64) {
+                    try? data.write(to: dm.localCoverURL(filename: filename))
+                    coverPath = filename
+                    localCoverFilenames.insert(filename)
+                }
+
+                let storyID = story.id
+                let existing = (try? modelContext.fetch(
+                    FetchDescriptor<LocalStory>(predicate: #Predicate { $0.storyID == storyID })
+                ))?.first
+                let record = existing ?? LocalStory(
+                    storyID: story.id,
+                    title: story.title,
+                    author: story.author,
+                    filenameBase: story.filenameBase,
+                    coverFilename: story.cover
                 )
+                record.epubLocalPath = epubPath
+                record.htmlLocalPath = htmlPath
+                record.coverLocalPath = coverPath
+                record.downloadedAt = Date()
                 if let updatedAtStr = story.updatedAt,
                    let serverDate = Self.isoFormatter.date(from: updatedAtStr) {
-                    let storyID = story.id
-                    if let record = (try? modelContext.fetch(
-                        FetchDescriptor<LocalStory>(predicate: #Predicate { $0.storyID == storyID })
-                    ))?.first {
-                        record.serverUpdatedAt = serverDate
-                        try? modelContext.save()
-                    }
+                    record.serverUpdatedAt = serverDate
                 }
-            } catch {
-                print("[LK-Sync] ✗ Failed to sync story \(story.id): \(error)")
+                if existing == nil { modelContext.insert(record) }
             }
+            try? modelContext.save()
+            print("[LK-Sync] ✓ Bulk content sync: batch \(index + 1)/\(batches.count) complete (\(batch.count) stories)")
         }
     }
 
