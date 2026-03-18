@@ -20,6 +20,9 @@ struct EPUBReaderView: View {
     @State private var publication: Publication?
     @State private var loadError: String?
     @State private var isContentReady = false
+    @State private var didLogFirstLocator = false
+    @State private var lastSavedFraction: Double = -1
+    @State private var didReadInSession = false
 
     @AppStorage("reader.fontSize")    private var fontSize:      Double = 17
     @AppStorage("reader.lineSpacing") private var lineSpacing:   Double = 1.58
@@ -88,7 +91,21 @@ struct EPUBReaderView: View {
                         if !isContentReady {
                             withAnimation(.easeOut(duration: 0.4)) { isContentReady = true }
                         }
-                        readingFraction = locator.locations.totalProgression ?? readingFraction
+                        let newFraction = locator.locations.totalProgression ?? readingFraction
+                        if !didLogFirstLocator {
+                            didLogFirstLocator = true
+                            let expectedPct = Int(readingFraction * 100)
+                            let actualPct = Int(newFraction * 100)
+                            print("[EPUB] first locator (transient, skipping save): actual=\(actualPct)% expected=\(expectedPct)%, href=\(locator.href)")
+                            // Readium fires this before finishing navigation to initialLocation.
+                            // Skip it to avoid overwriting the correct saved locator with a transient position.
+                            return
+                        }
+                        guard abs(newFraction - lastSavedFraction) >= 0.01 else { return }
+                        lastSavedFraction = newFraction
+                        if newFraction > readingFraction + 0.01 { didReadInSession = true }
+                        readingFraction = newFraction
+                        print("[EPUB] local save: \(Int(readingFraction * 100))% (progression=\(String(format: "%.4f", readingFraction)), href=\(locator.href))")
                         if let localStory {
                             localStory.readingProgressLocator = locator.jsonString
                             localStory.readingProgressPercentage = readingFraction * 100
@@ -151,11 +168,25 @@ struct EPUBReaderView: View {
             if colorThemeRaw.isEmpty {
                 colorThemeRaw = (systemColorScheme == .dark ? ReaderTheme.darkNavy : .beige).rawValue
             }
-            readingFraction = (localStory?.readingProgressPercentage ?? 0) / 100
+            // Initialize from the locator's own totalProgression so EPUB always
+            // shows its last known position, not a percentage written by the HTML reader.
+            let locatorJSON = localStory?.readingProgressLocator
+            if let json = locatorJSON,
+               let locator = try? Locator(jsonString: json),
+               let prog = locator.locations.totalProgression {
+                readingFraction = prog
+            } else {
+                readingFraction = (localStory?.readingProgressPercentage ?? 0) / 100
+            }
+            print("[EPUB] opening story '\(story.title)' (id=\(story.id)): expected \(Int(readingFraction * 100))%, locator=\(locatorJSON ?? "none")")
             Task { await openPublication() }
         }
         .onDisappear {
-            guard readingFraction > 0 else { return }
+            guard readingFraction > 0, didReadInSession else {
+                print("[EPUB] onDisappear: no forward progress in session, skipping server save")
+                return
+            }
+            print("[EPUB] server sync (on dismiss): \(Int(readingFraction * 100))% (fraction=\(String(format: "%.4f", readingFraction))) for story \(story.id)")
             let progress = ReadingProgress(
                 currentChapter: nil,
                 cfi: nil,

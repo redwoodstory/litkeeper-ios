@@ -131,8 +131,6 @@ struct HTMLReaderView: View {
     @State private var showSettings = false
     @State private var scrollProgress: Double = 0
     @State private var scrollPositionID: String?
-    @State private var contentHeight: CGFloat = 0
-    @State private var viewportHeight: CGFloat = 0
     @State private var didRestorePosition = false
     @State private var lastSavedFraction: Double = -1
     @State private var lastPushedFraction: Double = -1
@@ -285,36 +283,22 @@ struct HTMLReaderView: View {
             .padding(.horizontal, CGFloat(hPadding))
             .padding(.top, 80)
             .padding(.bottom, 20)
-            .background(
-                GeometryReader { geo in
-                    Color.clear
-                        .preference(key: ScrollOffsetKey.self,
-                                    value: geo.frame(in: .named("readerScroll")).minY)
-                        .onAppear { contentHeight = geo.size.height }
-                        .onChange(of: geo.size.height) { _, h in contentHeight = h }
-                }
-            )
         }
-        .coordinateSpace(name: "readerScroll")
-        .background(
-            GeometryReader { geo in
-                theme.background.onAppear { viewportHeight = geo.size.height }
-            }
-        )
+        .background(theme.background)
         .scrollPosition(id: $scrollPositionID, anchor: .top)
-        .onTapGesture {
-            withAnimation(.easeInOut(duration: 0.25)) { showControls.toggle() }
-        }
-        .onChange(of: contentHeight) { _, _ in restorePositionIfNeeded() }
-        .onChange(of: viewportHeight) { _, _ in restorePositionIfNeeded() }
-        .onPreferenceChange(ScrollOffsetKey.self) { minY in
-            let offsetY = max(-minY, 0)
-            let maxScroll = max(contentHeight - viewportHeight, 1)
-            let fraction = min(offsetY / maxScroll, 1)
+        .onScrollGeometryChange(for: Double.self) { geo in
+            let offset = max(geo.contentOffset.y - geo.contentInsets.top, 0)
+            let maxScroll = max(geo.contentSize.height - geo.containerSize.height, 1)
+            return min(offset / maxScroll, 1)
+        } action: { _, fraction in
+            guard didRestorePosition else {
+                restorePositionIfNeeded()
+                return
+            }
             scrollProgress = fraction
-            guard contentHeight > 0, viewportHeight > 0 else { return }
             if abs(fraction - lastSavedFraction) >= 0.01 {
                 lastSavedFraction = fraction
+                print("[HTML] local save: \(Int(fraction * 100))% (scrollY=\(String(format: "%.4f", fraction)))")
                 if let localStory {
                     localStory.readingProgressScrollY = fraction
                     localStory.readingProgressPercentage = fraction * 100
@@ -323,6 +307,7 @@ struct HTMLReaderView: View {
             }
             if fraction > lastPushedFraction + 0.05 {
                 lastPushedFraction = fraction
+                print("[HTML] server sync (in-session): \(Int(fraction * 100))% (fraction=\(String(format: "%.4f", fraction)))")
                 let storyID = story.id
                 let progress = ReadingProgress(
                     currentChapter: nil, cfi: nil,
@@ -332,6 +317,9 @@ struct HTMLReaderView: View {
                 )
                 Task { try? await appState.makeAPIClient().saveProgress(storyID: storyID, progress: progress) }
             }
+        }
+        .onTapGesture {
+            withAnimation(.easeInOut(duration: 0.25)) { showControls.toggle() }
         }
         .ignoresSafeArea(edges: .bottom)
         .overlay(alignment: .top) {
@@ -361,15 +349,17 @@ struct HTMLReaderView: View {
     }
 
     private func restorePositionIfNeeded() {
-        guard !didRestorePosition, contentHeight > 0, viewportHeight > 0 else { return }
+        guard !didRestorePosition else { return }
         guard let content else { return }
         didRestorePosition = true
         let localFraction = localStory?.readingProgressScrollY ?? 0
-        let saved = localFraction > 0 ? localFraction : (serverScrollFraction ?? 0)
+        let serverFraction = serverScrollFraction ?? 0
+        let saved = max(localFraction, serverFraction)
         guard saved > 0 else {
             print("[HTML] restore: no saved progress, starting at beginning")
             return
         }
+        print("[HTML] restore: local=\(Int(localFraction * 100))% server=\(Int(serverFraction * 100))% → using \(Int(saved * 100))%")
         let totalParas = content.totalParagraphs
         let paraIndex = Int(saved * Double(max(totalParas - 1, 1)))
         scrollProgress = saved
@@ -735,13 +725,6 @@ private struct LabeledSlider: View {
             Slider(value: $value, in: range, step: step)
         }
     }
-}
-
-// MARK: - Scroll offset preference key
-
-private struct ScrollOffsetKey: PreferenceKey {
-    static var defaultValue: CGFloat = 0
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = nextValue() }
 }
 
 // MARK: - Hex color convenience
