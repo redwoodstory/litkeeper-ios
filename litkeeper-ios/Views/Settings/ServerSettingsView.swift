@@ -5,10 +5,8 @@ struct ServerSettingsView: View {
 
     @State private var urlDraft: String = ""
     @State private var tokenDraft: String = ""
-    @State private var proxyKeyDraft: String = ""
-    @State private var proxyHeaderDraft: String = ""
-    @State private var proxyKeyDraft2: String = ""
-    @State private var proxyHeaderDraft2: String = ""
+    @State private var pangolinTokenIdDraft: String = ""
+    @State private var pangolinTokenDraft: String = ""
     @State private var testResult: TestResult? = nil
     @State private var isTesting = false
     @State private var showDisconnectConfirm = false
@@ -43,34 +41,22 @@ struct ServerSettingsView: View {
             }
 
             Section {
-                LabeledContent("Header 1 Name") {
-                    TextField("X-API-Key", text: $proxyHeaderDraft)
+                LabeledContent("Token ID") {
+                    SecureField("P-Access-Token-Id value", text: $pangolinTokenIdDraft)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
                         .multilineTextAlignment(.trailing)
                 }
-                LabeledContent("Header 1 Value") {
-                    SecureField("Leave blank for LAN access", text: $proxyKeyDraft)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                        .multilineTextAlignment(.trailing)
-                }
-                LabeledContent("Header 2 Name") {
-                    TextField("Optional second header", text: $proxyHeaderDraft2)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                        .multilineTextAlignment(.trailing)
-                }
-                LabeledContent("Header 2 Value") {
-                    SecureField("Optional", text: $proxyKeyDraft2)
+                LabeledContent("Token") {
+                    SecureField("P-Access-Token value", text: $pangolinTokenDraft)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
                         .multilineTextAlignment(.trailing)
                 }
             } header: {
-                Text("External Proxy")
+                Text("Pangolin Access Control")
             } footer: {
-                Text("Required when accessing via a reverse proxy (e.g. Pangolin) from outside your LAN. For Pangolin, set Header 1 to P-Access-Token-Id and Header 2 to P-Access-Token. Leave blank for direct LAN access.")
+                Text("Required when accessing via Pangolin from outside your LAN. Find these under Access > [your resource] in the Pangolin dashboard. Leave blank for direct LAN access.")
                     .font(.caption)
             }
 
@@ -112,10 +98,8 @@ struct ServerSettingsView: View {
         .onAppear {
             urlDraft = appState.serverURL
             tokenDraft = appState.apiToken
-            proxyKeyDraft = appState.proxyAPIKey
-            proxyHeaderDraft = appState.proxyHeaderName
-            proxyKeyDraft2 = appState.proxyAPIKey2
-            proxyHeaderDraft2 = appState.proxyHeaderName2
+            pangolinTokenIdDraft = appState.pangolinTokenId
+            pangolinTokenDraft = appState.pangolinToken
         }
         .onChange(of: urlDraft) { _, new in
             appState.serverURL = new
@@ -125,20 +109,12 @@ struct ServerSettingsView: View {
             appState.apiToken = new
             testResult = nil
         }
-        .onChange(of: proxyKeyDraft) { _, new in
-            appState.proxyAPIKey = new
+        .onChange(of: pangolinTokenIdDraft) { _, new in
+            appState.pangolinTokenId = new
             testResult = nil
         }
-        .onChange(of: proxyHeaderDraft) { _, new in
-            appState.proxyHeaderName = new.isEmpty ? "X-API-Key" : new
-            testResult = nil
-        }
-        .onChange(of: proxyKeyDraft2) { _, new in
-            appState.proxyAPIKey2 = new
-            testResult = nil
-        }
-        .onChange(of: proxyHeaderDraft2) { _, new in
-            appState.proxyHeaderName2 = new
+        .onChange(of: pangolinTokenDraft) { _, new in
+            appState.pangolinToken = new
             testResult = nil
         }
         .confirmationDialog(
@@ -149,12 +125,12 @@ struct ServerSettingsView: View {
             Button("Disconnect", role: .destructive) {
                 appState.serverURL = ""
                 appState.apiToken = ""
-                appState.proxyAPIKey = ""
-                appState.proxyAPIKey2 = ""
+                appState.pangolinTokenId = ""
+                appState.pangolinToken = ""
                 urlDraft = ""
                 tokenDraft = ""
-                proxyKeyDraft = ""
-                proxyKeyDraft2 = ""
+                pangolinTokenIdDraft = ""
+                pangolinTokenDraft = ""
                 testResult = nil
             }
         } message: {
@@ -165,6 +141,9 @@ struct ServerSettingsView: View {
     private func testConnection() {
         isTesting = true
         testResult = nil
+        let idLen = appState.pangolinTokenId.count
+        let tokLen = appState.pangolinToken.count
+        print("[LK-Settings] testConnection — pangolinTokenId: \(idLen) chars, pangolinToken: \(tokLen) chars")
         let client = appState.makeAPIClient()
         Task {
             do {

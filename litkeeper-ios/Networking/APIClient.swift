@@ -3,24 +3,20 @@ import Foundation
 actor APIClient {
     private let baseURL: URL
     private let token: String
-    private let proxyAPIKey: String?
-    private let proxyHeaderName: String
-    private let proxyAPIKey2: String?
-    private let proxyHeaderName2: String
+    private let pangolinTokenId: String?
+    private let pangolinToken: String?
     private let session: URLSession
 
-    init(baseURLString: String, token: String, proxyAPIKey: String? = nil, proxyHeaderName: String = "X-API-Key", proxyAPIKey2: String? = nil, proxyHeaderName2: String = "") {
+    init(baseURLString: String, token: String, pangolinTokenId: String? = nil, pangolinToken: String? = nil) {
         // Normalize: strip trailing slash
         let cleaned = baseURLString.hasSuffix("/")
             ? String(baseURLString.dropLast())
             : baseURLString
         self.baseURL = URL(string: cleaned) ?? URL(string: "http://localhost:5017")!
         self.token = token
-        self.proxyAPIKey = proxyAPIKey
-        self.proxyHeaderName = proxyHeaderName
-        self.proxyAPIKey2 = proxyAPIKey2
-        self.proxyHeaderName2 = proxyHeaderName2
-        let config = URLSessionConfiguration.default
+        self.pangolinTokenId = pangolinTokenId
+        self.pangolinToken = pangolinToken
+        let config = URLSessionConfiguration.ephemeral
         config.timeoutIntervalForRequest = 30
         self.session = URLSession(configuration: config)
     }
@@ -119,16 +115,17 @@ actor APIClient {
     }
 
     func fetchAllProgress(storyIDs: [Int]) async -> [Int: ReadingProgress] {
-        await withTaskGroup(of: (Int, ReadingProgress?).self) { group in
-            for id in storyIDs {
-                group.addTask { (id, try? await self.fetchProgress(storyID: id)) }
-            }
-            var result: [Int: ReadingProgress] = [:]
-            for await (id, progress) in group {
-                if let p = progress { result[id] = p }
-            }
-            return result
+        guard !storyIDs.isEmpty else { return [:] }
+        let ids = storyIDs.map(String.init).joined(separator: ",")
+        guard let data = try? await get("/epub/api/progress/bulk?ids=\(ids)") else { return [:] }
+        struct BulkResponse: Codable {
+            let progress: [String: ReadingProgress]
         }
+        guard let response = try? decode(BulkResponse.self, from: data) else { return [:] }
+        return Dictionary(uniqueKeysWithValues: response.progress.compactMap { key, value in
+            guard let id = Int(key) else { return nil }
+            return (id, value)
+        })
     }
 
     func saveProgress(storyID: Int, progress: ReadingProgress) async throws {
@@ -161,22 +158,27 @@ actor APIClient {
     // MARK: - Connection Test
 
     func testConnection() async throws {
-        _ = try await get("/api/library")
+        let data = try await get("/api/library")
+        // Reject HTML responses — Pangolin auth pages return 200 HTML when token auth fails
+        if let first = data.first, first == UInt8(ascii: "<") {
+            print("[LK-API] ✗ testConnection: got HTML response, not JSON — Pangolin auth page?")
+            throw APIError.unauthorized
+        }
     }
 
     // MARK: - Private HTTP helpers
 
     private func request(for path: String, method: String) -> URLRequest {
-        let url = baseURL.appendingPathComponent(String(path.dropFirst()))  // drop leading /
+        let url = URL(string: baseURL.absoluteString + path) ?? baseURL
         var req = URLRequest(url: url)
         req.httpMethod = method
         req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         req.setValue("application/json", forHTTPHeaderField: "Accept")
-        if let key = proxyAPIKey {
-            req.setValue(key, forHTTPHeaderField: proxyHeaderName)
+        if let id = pangolinTokenId {
+            req.setValue(id, forHTTPHeaderField: "P-Access-Token-Id")
         }
-        if let key2 = proxyAPIKey2, !proxyHeaderName2.isEmpty {
-            req.setValue(key2, forHTTPHeaderField: proxyHeaderName2)
+        if let tok = pangolinToken {
+            req.setValue(tok, forHTTPHeaderField: "P-Access-Token")
         }
         return req
     }
@@ -214,33 +216,67 @@ actor APIClient {
 
     private func perform(_ request: URLRequest) async throws -> Data {
         let method = request.httpMethod ?? "GET"
-        let path = request.url?.path ?? "?"
+        let fullURL = request.url?.absoluteString ?? "?"
         let start = Date()
-        print("[LK-API] → \(method) \(path)")
+
+        // Debug: log full URL and Pangolin header presence
+        print("[LK-API] → \(method) \(fullURL)")
+        if let id = pangolinTokenId {
+            print("[LK-API]   P-Access-Token-Id: …\(id.suffix(4)) (\(id.count) chars)")
+        } else {
+            print("[LK-API]   P-Access-Token-Id: (not configured)")
+        }
+        if let tok = pangolinToken {
+            print("[LK-API]   P-Access-Token: …\(tok.suffix(4)) (\(tok.count) chars)")
+        } else {
+            print("[LK-API]   P-Access-Token: (not configured)")
+        }
+
+        // Preserve auth headers across redirects — URLSession strips custom headers by default,
+        // which drops P-Access-Token on any HTTP redirect and causes a 403.
+        var authHeaders: [String: String] = [
+            "Authorization": "Bearer \(token)",
+            "Accept": "application/json"
+        ]
+        if let id = pangolinTokenId { authHeaders["P-Access-Token-Id"] = id }
+        if let tok = pangolinToken { authHeaders["P-Access-Token"] = tok }
+        let redirectDelegate = HeaderPreservingDelegate(headers: authHeaders)
+
         do {
-            let (data, response) = try await session.data(for: request)
+            let (data, response) = try await session.data(for: request, delegate: redirectDelegate)
             guard let http = response as? HTTPURLResponse else {
                 throw APIError.networkError(URLError(.badServerResponse))
             }
             let elapsed = String(format: "%.2fs", Date().timeIntervalSince(start))
             switch http.statusCode {
             case 200...299:
-                print("[LK-API] ← \(http.statusCode) \(path) (\(elapsed), \(data.count)B)")
+                let responseURL = http.url?.absoluteString ?? fullURL
+                if responseURL != fullURL {
+                    print("[LK-API] ← \(http.statusCode) \(responseURL) [redirected from \(fullURL)] (\(elapsed), \(data.count)B)")
+                } else {
+                    print("[LK-API] ← \(http.statusCode) \(fullURL) (\(elapsed), \(data.count)B)")
+                }
                 return data
             case 401:
-                print("[LK-API] ✗ 401 Unauthorized \(path)")
+                print("[LK-API] ✗ 401 \(http.url?.absoluteString ?? fullURL)")
+                if let body = String(data: data, encoding: .utf8), !body.isEmpty {
+                    print("[LK-API]   Response body: \(body.prefix(500))")
+                }
                 throw APIError.unauthorized
             case 404:
-                print("[LK-API] ✗ 404 Not Found \(path)")
+                print("[LK-API] ✗ 404 \(http.url?.absoluteString ?? fullURL)")
                 throw APIError.notFound
             default:
-                print("[LK-API] ✗ \(http.statusCode) Server Error \(path)")
+                print("[LK-API] ✗ \(http.statusCode) \(http.url?.absoluteString ?? fullURL) (\(elapsed))")
+                if let body = String(data: data, encoding: .utf8), !body.isEmpty {
+                    print("[LK-API]   Response body: \(body.prefix(500))")
+                }
                 throw APIError.serverError(http.statusCode)
             }
         } catch let error as APIError {
             throw error
         } catch {
-            print("[LK-API] ✗ Network error on \(path): \(error.localizedDescription)")
+            print("[LK-API] ✗ Network error on \(fullURL): \(error.localizedDescription)")
             throw APIError.networkError(error)
         }
     }
@@ -253,5 +289,31 @@ actor APIClient {
             print("[LK-API] ✗ Decode error for \(T.self): \(error)")
             throw APIError.decodingError(error)
         }
+    }
+}
+
+// Preserves custom auth headers when URLSession follows HTTP redirects.
+// URLSession strips non-standard headers (Authorization, P-Access-Token-*) on redirect
+// by default, which causes Pangolin to return 403 on the redirected request.
+private final class HeaderPreservingDelegate: NSObject, URLSessionTaskDelegate {
+    private let headers: [String: String]
+
+    init(headers: [String: String]) {
+        self.headers = headers
+    }
+
+    func urlSession(
+        _ session: URLSession,
+        task: URLSessionTask,
+        willPerformHTTPRedirection response: HTTPURLResponse,
+        newRequest request: URLRequest,
+        completionHandler: @escaping (URLRequest?) -> Void
+    ) {
+        var newReq = request
+        for (key, value) in headers {
+            newReq.setValue(value, forHTTPHeaderField: key)
+        }
+        print("[LK-API] ↪ Redirect \(response.statusCode) → \(request.url?.absoluteString ?? "?") (re-adding \(headers.count) headers)")
+        completionHandler(newReq)
     }
 }

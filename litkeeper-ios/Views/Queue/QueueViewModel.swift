@@ -30,7 +30,7 @@ final class QueueViewModel {
         stopAutoRefresh()
         refreshTask = Task {
             while !Task.isCancelled {
-                try? await Task.sleep(nanoseconds: 5_000_000_000)
+                try? await Task.sleep(nanoseconds: 15_000_000_000)
                 if !Task.isCancelled {
                     await refresh(appState: appState)
                 }

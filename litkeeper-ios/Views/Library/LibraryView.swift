@@ -46,7 +46,9 @@ struct LibraryView: View {
                                         story: story,
                                         isDownloaded: viewModel.isDownloaded(story),
                                         coverURL: coverURL(for: story),
-                                        token: appState.apiToken
+                                        token: appState.apiToken,
+                                        pangolinTokenId: appState.pangolinTokenId,
+                                        pangolinToken: appState.pangolinToken
                                     )
                                 }
                                 .buttonStyle(.plain)
@@ -56,8 +58,8 @@ struct LibraryView: View {
                     }
                     .refreshable {
                         await viewModel.refresh(appState: appState)
-                        Task { await syncService.syncCovers(for: viewModel.stories, serverURL: appState.serverURL, token: appState.apiToken) }
-                        Task { await syncService.syncContent(for: viewModel.stories, serverURL: appState.serverURL, token: appState.apiToken, modelContext: modelContext, localStories: localStories) }
+                        Task { await syncService.syncCovers(for: viewModel.stories, serverURL: appState.serverURL, token: appState.apiToken, pangolinTokenId: appState.pangolinTokenId, pangolinToken: appState.pangolinToken) }
+                        Task { await syncService.syncContent(for: viewModel.stories, serverURL: appState.serverURL, token: appState.apiToken, pangolinTokenId: appState.pangolinTokenId, pangolinToken: appState.pangolinToken, modelContext: modelContext, localStories: localStories) }
                     }
                 }
             }
@@ -113,8 +115,8 @@ struct LibraryView: View {
             viewModel.updateDownloadedIDs(from: localStories)
             await viewModel.refresh(appState: appState)
             Task { await syncService.syncMetadata(appState: appState, modelContext: modelContext) }
-            Task { await syncService.syncCovers(for: viewModel.stories, serverURL: appState.serverURL, token: appState.apiToken) }
-            Task { await syncService.syncContent(for: viewModel.stories, serverURL: appState.serverURL, token: appState.apiToken, modelContext: modelContext, localStories: localStories) }
+            Task { await syncService.syncCovers(for: viewModel.stories, serverURL: appState.serverURL, token: appState.apiToken, pangolinTokenId: appState.pangolinTokenId, pangolinToken: appState.pangolinToken) }
+            Task { await syncService.syncContent(for: viewModel.stories, serverURL: appState.serverURL, token: appState.apiToken, pangolinTokenId: appState.pangolinTokenId, pangolinToken: appState.pangolinToken, modelContext: modelContext, localStories: localStories) }
         }
         .task {
             // Periodic library + metadata sync — fires every 5 minutes while the view is active
@@ -139,8 +141,9 @@ struct LibraryView: View {
 
     private func coverURL(for story: Story) -> URL? {
         let filename = story.cover ?? "\(story.filenameBase).jpg"
-        if syncService.localCoverFilenames.contains(filename) {
-            return DownloadManager.shared.localCoverURL(filename: filename)
+        let localURL = DownloadManager.shared.localCoverURL(filename: filename)
+        if FileManager.default.fileExists(atPath: localURL.path) {
+            return localURL
         }
         guard !appState.serverURL.isEmpty else { return nil }
         let base = appState.serverURL.hasSuffix("/") ? String(appState.serverURL.dropLast()) : appState.serverURL

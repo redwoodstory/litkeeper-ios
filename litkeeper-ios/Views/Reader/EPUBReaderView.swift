@@ -14,7 +14,7 @@ struct EPUBReaderView: View {
     @Environment(\.dismiss)       private var dismiss
     @Environment(\.colorScheme)   private var systemColorScheme
 
-    @State private var showControls = true
+    @State private var showControls = false
     @State private var showSettings = false
     @State private var readingFraction: Double = 0
     @State private var publication: Publication?
@@ -360,7 +360,14 @@ struct ReadiumEPUBView: UIViewControllerRepresentable {
         func navigator(_ navigator: Navigator, presentError error: NavigatorError) {}
 
         func navigator(_ navigator: VisualNavigator, didTapAt point: CGPoint) {
-            onTap()
+            let width = UIScreen.main.bounds.width
+            if point.x < width / 3 {
+                Task { await navigator.goLeft(options: .init(animated: true)) }
+            } else if point.x > 2 * width / 3 {
+                Task { await navigator.goRight(options: .init(animated: true)) }
+            } else {
+                onTap()
+            }
         }
     }
 }

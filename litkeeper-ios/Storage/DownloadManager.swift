@@ -58,6 +58,8 @@ final class DownloadManager {
         story: Story,
         serverBaseURL: String,
         token: String,
+        pangolinTokenId: String? = nil,
+        pangolinToken: String? = nil,
         modelContext: ModelContext,
         onProgress: @escaping (Double, String) -> Void
     ) async throws {
@@ -73,7 +75,7 @@ final class DownloadManager {
             onProgress(0.0, "Downloading EPUB…")
             let url = base.appendingPathComponent("epub/file/\(story.id)")
             let dest = localEPUBURL(filenameBase: story.filenameBase)
-            try await downloadFile(from: url, token: token, to: dest)
+            try await downloadFile(from: url, token: token, pangolinTokenId: pangolinTokenId, pangolinToken: pangolinToken, to: dest)
             epubPath = "\(story.filenameBase).epub"
             onProgress(0.5, "EPUB saved")
         }
@@ -83,7 +85,7 @@ final class DownloadManager {
             onProgress(story.hasEPUB ? 0.5 : 0.0, "Downloading HTML…")
             let url = base.appendingPathComponent("download/\(story.filenameBase).json")
             let dest = localHTMLURL(filenameBase: story.filenameBase)
-            try await downloadFile(from: url, token: token, to: dest)
+            try await downloadFile(from: url, token: token, pangolinTokenId: pangolinTokenId, pangolinToken: pangolinToken, to: dest)
             htmlPath = "\(story.filenameBase).json"
             onProgress(0.85, "HTML saved")
         }
@@ -93,7 +95,7 @@ final class DownloadManager {
             onProgress(0.85, "Downloading cover…")
             let url = base.appendingPathComponent("api/cover/\(coverFilename)")
             let dest = localCoverURL(filename: coverFilename)
-            try? await downloadFile(from: url, token: token, to: dest)
+            try? await downloadFile(from: url, token: token, pangolinTokenId: pangolinTokenId, pangolinToken: pangolinToken, to: dest)
             coverPath = coverFilename
         }
 
@@ -119,9 +121,11 @@ final class DownloadManager {
         onProgress(1.0, "Done")
     }
 
-    private func downloadFile(from url: URL, token: String, to destination: URL) async throws {
+    private func downloadFile(from url: URL, token: String, pangolinTokenId: String? = nil, pangolinToken: String? = nil, to destination: URL) async throws {
         var request = URLRequest(url: url)
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        if let id = pangolinTokenId { request.setValue(id, forHTTPHeaderField: "P-Access-Token-Id") }
+        if let tok = pangolinToken { request.setValue(tok, forHTTPHeaderField: "P-Access-Token") }
         request.timeoutInterval = 120
 
         let (tempURL, response) = try await URLSession.shared.download(for: request)

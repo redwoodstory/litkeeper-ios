@@ -154,7 +154,7 @@ struct StoryDetailView: View {
     @ViewBuilder
     private var headerSection: some View {
         HStack(alignment: .top, spacing: 16) {
-            CoverImageView(url: coverURL, title: editableTitle, author: editableAuthor, token: appState.apiToken)
+            CoverImageView(url: coverURL, title: editableTitle, author: editableAuthor, token: appState.apiToken, pangolinTokenId: appState.pangolinTokenId, pangolinToken: appState.pangolinToken)
                 .frame(width: 100, height: 150)
                 .clipShape(RoundedRectangle(cornerRadius: 10))
                 .shadow(color: .black.opacity(0.18), radius: 6, x: 0, y: 3)
@@ -412,8 +412,9 @@ struct StoryDetailView: View {
 
     private var coverURL: URL? {
         let filename = story.cover ?? "\(story.filenameBase).jpg"
-        if syncService.localCoverFilenames.contains(filename) {
-            return DownloadManager.shared.localCoverURL(filename: filename)
+        let localURL = DownloadManager.shared.localCoverURL(filename: filename)
+        if FileManager.default.fileExists(atPath: localURL.path) {
+            return localURL
         }
         guard !appState.serverURL.isEmpty else { return nil }
         let base = appState.serverURL.hasSuffix("/") ? String(appState.serverURL.dropLast()) : appState.serverURL
@@ -439,6 +440,8 @@ struct StoryDetailView: View {
                     story: story,
                     serverBaseURL: appState.serverURL,
                     token: appState.apiToken,
+                    pangolinTokenId: appState.pangolinTokenId,
+                    pangolinToken: appState.pangolinToken,
                     modelContext: modelContext
                 ) { _, _ in }
             } catch {

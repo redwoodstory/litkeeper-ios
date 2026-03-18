@@ -57,17 +57,10 @@ final class ReadingQueueViewModel {
 
     private func fetchProgressForQueue(client: APIClient) async {
         let ids = queuedStories.map { $0.id }
-        await withTaskGroup(of: (Int, Double?).self) { group in
-            for id in ids {
-                group.addTask {
-                    let p = try? await client.fetchProgress(storyID: id)
-                    return (id, p?.percentage)
-                }
-            }
-            for await (id, pct) in group {
-                if let pct {
-                    progressByStoryID[id] = pct
-                }
+        let result = await client.fetchAllProgress(storyIDs: ids)
+        for (id, progress) in result {
+            if let pct = progress.percentage {
+                progressByStoryID[id] = pct
             }
         }
     }

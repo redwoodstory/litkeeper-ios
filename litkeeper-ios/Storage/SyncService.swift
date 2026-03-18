@@ -21,48 +21,64 @@ final class SyncService {
 
     // MARK: - Cover Sync
 
-    func syncCovers(for stories: [Story], serverURL: String, token: String) async {
+    func syncCovers(for stories: [Story], serverURL: String, token: String, pangolinTokenId: String? = nil, pangolinToken: String? = nil) async {
         guard !serverURL.isEmpty, !token.isEmpty, !isSyncingCovers else { return }
         isSyncingCovers = true
         defer { isSyncingCovers = false }
 
         let base = serverURL.hasSuffix("/") ? String(serverURL.dropLast()) : serverURL
 
-        await withTaskGroup(of: (String, Data)?.self) { group in
-            for story in stories {
-                let filename = story.cover ?? "\(story.filenameBase).jpg"
-                let localURL = DownloadManager.shared.localCoverURL(filename: filename)
+        var pending: [(filename: String, remoteURL: URL)] = []
+        for story in stories {
+            let filename = story.cover ?? "\(story.filenameBase).jpg"
+            let localURL = DownloadManager.shared.localCoverURL(filename: filename)
 
-                if FileManager.default.fileExists(atPath: localURL.path) {
-                    if let updatedAtStr = story.updatedAt,
-                       let serverDate = Self.isoFormatter.date(from: updatedAtStr),
-                       let attrs = try? FileManager.default.attributesOfItem(atPath: localURL.path),
-                       let fileDate = attrs[.modificationDate] as? Date,
-                       fileDate >= serverDate {
-                        localCoverFilenames.insert(filename)
-                        continue
-                    }
-                }
-
-                guard let remoteURL = URL(string: "\(base)/api/cover/\(filename)") else { continue }
-                let capturedFilename = filename
-                let capturedToken = token
-
-                group.addTask {
-                    var request = URLRequest(url: remoteURL)
-                    request.setValue("Bearer \(capturedToken)", forHTTPHeaderField: "Authorization")
-                    guard let (data, response) = try? await URLSession.shared.data(for: request),
-                          let http = response as? HTTPURLResponse,
-                          http.statusCode == 200 else { return nil }
-                    return (capturedFilename, data)
+            if FileManager.default.fileExists(atPath: localURL.path) {
+                if let updatedAtStr = story.updatedAt,
+                   let serverDate = Self.isoFormatter.date(from: updatedAtStr),
+                   let attrs = try? FileManager.default.attributesOfItem(atPath: localURL.path),
+                   let fileDate = attrs[.modificationDate] as? Date,
+                   fileDate >= serverDate {
+                    localCoverFilenames.insert(filename)
+                    continue
                 }
             }
 
-            for await result in group {
-                guard let (filename, data) = result else { continue }
-                let localURL = DownloadManager.shared.localCoverURL(filename: filename)
-                try? data.write(to: localURL)
-                localCoverFilenames.insert(filename)
+            guard let remoteURL = URL(string: "\(base)/api/cover/\(filename)") else { continue }
+            pending.append((filename, remoteURL))
+        }
+
+        let batches = stride(from: 0, to: pending.count, by: 5).map {
+            Array(pending[$0..<min($0 + 5, pending.count)])
+        }
+        for (index, batch) in batches.enumerated() {
+            if index > 0 {
+                try? await Task.sleep(nanoseconds: 500_000_000) // 500ms between batches
+            }
+            await withTaskGroup(of: (String, Data)?.self) { group in
+                for item in batch {
+                    let capturedFilename = item.filename
+                    let capturedURL = item.remoteURL
+                    let capturedToken = token
+                    let capturedPangolinId = pangolinTokenId
+                    let capturedPangolinToken = pangolinToken
+                    group.addTask {
+                        var request = URLRequest(url: capturedURL)
+                        request.setValue("Bearer \(capturedToken)", forHTTPHeaderField: "Authorization")
+                        if let id = capturedPangolinId { request.setValue(id, forHTTPHeaderField: "P-Access-Token-Id") }
+                        if let tok = capturedPangolinToken { request.setValue(tok, forHTTPHeaderField: "P-Access-Token") }
+                        guard let (data, response) = try? await URLSession.shared.data(for: request),
+                              let http = response as? HTTPURLResponse,
+                              http.statusCode == 200 else { return nil }
+                        return (capturedFilename, data)
+                    }
+                }
+                for await result in group {
+                    guard let (filename, data) = result else { continue }
+                    let localURL = DownloadManager.shared.localCoverURL(filename: filename)
+                    try? data.write(to: localURL)
+                    localCoverFilenames.insert(filename)
+                }
             }
         }
     }
@@ -73,6 +89,8 @@ final class SyncService {
         for stories: [Story],
         serverURL: String,
         token: String,
+        pangolinTokenId: String? = nil,
+        pangolinToken: String? = nil,
         modelContext: ModelContext,
         localStories: [LocalStory]
     ) async {
@@ -100,6 +118,8 @@ final class SyncService {
                     story: story,
                     serverBaseURL: serverURL,
                     token: token,
+                    pangolinTokenId: pangolinTokenId,
+                    pangolinToken: pangolinToken,
                     modelContext: modelContext,
                     onProgress: { _, _ in }
                 )

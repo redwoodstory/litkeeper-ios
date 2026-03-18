@@ -5,6 +5,8 @@ struct CoverImageView: View {
     let title: String
     let author: String
     var token: String = ""
+    var pangolinTokenId: String = ""
+    var pangolinToken: String = ""
 
     @State private var loadedImage: UIImage? = nil
     @State private var isLoading: Bool = true
@@ -54,6 +56,8 @@ struct CoverImageView: View {
         if !token.isEmpty {
             request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         }
+        if !pangolinTokenId.isEmpty { request.setValue(pangolinTokenId, forHTTPHeaderField: "P-Access-Token-Id") }
+        if !pangolinToken.isEmpty { request.setValue(pangolinToken, forHTTPHeaderField: "P-Access-Token") }
         guard let (data, response) = try? await URLSession.shared.data(for: request),
               let http = response as? HTTPURLResponse else {
             print("[LK-IMG] ✗ No response for \(url.lastPathComponent)")
