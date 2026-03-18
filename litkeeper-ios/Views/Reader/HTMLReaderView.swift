@@ -130,10 +130,13 @@ struct HTMLReaderView: View {
     @State private var showControls = true
     @State private var showSettings = false
     @State private var scrollProgress: Double = 0
-    @State private var highWaterIndex: Int = 0
     @State private var scrollPositionID: String?
+    @State private var contentHeight: CGFloat = 0
+    @State private var viewportHeight: CGFloat = 0
+    @State private var didRestorePosition = false
+    @State private var lastSavedFraction: Double = -1
+    @State private var lastPushedFraction: Double = -1
     @State private var serverScrollFraction: Double? = nil
-    @State private var lastPushedProgressMilestone: Int = -1
 
     private var theme: ReaderTheme {
         if colorThemeRaw.isEmpty {
@@ -248,10 +251,8 @@ struct HTMLReaderView: View {
 
     @ViewBuilder
     private func readerBody(content: StoryContent) -> some View {
-        let totalParas = content.totalParagraphs
-
         ScrollView(.vertical) {
-            LazyVStack(alignment: .leading, spacing: 0) {
+            VStack(alignment: .leading, spacing: 0) {
                 ForEach(buildItems(content: content)) { item in
                     switch item {
                     case .header:
@@ -275,43 +276,61 @@ struct HTMLReaderView: View {
                                 .frame(height: 1.5)
                         }
                         .padding(.bottom, 24)
-                    case .paragraph(let flatIndex, let text, let totalParas):
-                        paragraphView(text: text, flatIndex: flatIndex, totalParas: totalParas)
+                    case .paragraph(_, let text, _):
+                        paragraphView(text: text)
                     }
                 }
                 Color.clear.frame(height: 32)
             }
             .padding(.horizontal, CGFloat(hPadding))
-            // Top padding keeps the first content clear of the controls bar
             .padding(.top, 80)
             .padding(.bottom, 20)
+            .background(
+                GeometryReader { geo in
+                    Color.clear
+                        .preference(key: ScrollOffsetKey.self,
+                                    value: geo.frame(in: .named("readerScroll")).minY)
+                        .onAppear { contentHeight = geo.size.height }
+                        .onChange(of: geo.size.height) { _, h in contentHeight = h }
+                }
+            )
         }
-        .background(theme.background)
-        // iOS 17 scrollPosition works with LazyVStack — items are rendered before scroll attempt
+        .coordinateSpace(name: "readerScroll")
+        .background(
+            GeometryReader { geo in
+                theme.background.onAppear { viewportHeight = geo.size.height }
+            }
+        )
         .scrollPosition(id: $scrollPositionID, anchor: .top)
         .onTapGesture {
             withAnimation(.easeInOut(duration: 0.25)) { showControls.toggle() }
         }
-        .onAppear {
-            let localFraction = localStory?.readingProgressScrollY ?? 0
-            let saved = localFraction > 0 ? localFraction : (serverScrollFraction ?? 0)
-            print("[HTML] onAppear: localScrollY=\(localFraction), serverFraction=\(serverScrollFraction?.description ?? "nil"), using saved=\(String(format: "%.4f", saved))")
-            guard saved > 0 else {
-                print("[HTML] onAppear: no saved progress, starting at beginning")
-                return
-            }
-            let paraIndex = Int(saved * Double(max(totalParas - 1, 1)))
-            highWaterIndex = paraIndex
-            scrollProgress = saved
-            if let (ci, pi) = content.chapterAndParagraph(for: paraIndex) {
-                let targetID = "p-\(content.flatIndex(chapterIndex: ci, paragraphIndex: pi))"
-                print("[HTML] onAppear: scheduling scroll to paragraph \(paraIndex)/\(totalParas), id=\(targetID)")
-                // Defer one frame so LazyVStack can register item IDs before scroll fires
-                Task { @MainActor in
-                    try? await Task.sleep(nanoseconds: 50_000_000)
-                    scrollPositionID = targetID
-                    print("[HTML] onAppear: scrollPositionID set to \(targetID)")
+        .onChange(of: contentHeight) { _, _ in restorePositionIfNeeded() }
+        .onChange(of: viewportHeight) { _, _ in restorePositionIfNeeded() }
+        .onPreferenceChange(ScrollOffsetKey.self) { minY in
+            let offsetY = max(-minY, 0)
+            let maxScroll = max(contentHeight - viewportHeight, 1)
+            let fraction = min(offsetY / maxScroll, 1)
+            scrollProgress = fraction
+            guard contentHeight > 0, viewportHeight > 0 else { return }
+            if abs(fraction - lastSavedFraction) >= 0.01 {
+                lastSavedFraction = fraction
+                if let localStory {
+                    localStory.readingProgressScrollY = fraction
+                    localStory.readingProgressPercentage = fraction * 100
+                    try? modelContext.save()
                 }
+            }
+            if fraction > lastPushedFraction + 0.05 {
+                lastPushedFraction = fraction
+                let storyID = story.id
+                let progress = ReadingProgress(
+                    currentChapter: nil, cfi: nil,
+                    percentage: fraction,
+                    isCompleted: fraction >= 0.99,
+                    lastReadAt: nil
+                )
+                Task { try? await appState.makeAPIClient().saveProgress(storyID: storyID, progress: progress) }
             }
         }
         .ignoresSafeArea(edges: .bottom)
@@ -338,6 +357,26 @@ struct HTMLReaderView: View {
             )
             .presentationDetents([.large])
             .presentationDragIndicator(.visible)
+        }
+    }
+
+    private func restorePositionIfNeeded() {
+        guard !didRestorePosition, contentHeight > 0, viewportHeight > 0 else { return }
+        guard let content else { return }
+        didRestorePosition = true
+        let localFraction = localStory?.readingProgressScrollY ?? 0
+        let saved = localFraction > 0 ? localFraction : (serverScrollFraction ?? 0)
+        guard saved > 0 else {
+            print("[HTML] restore: no saved progress, starting at beginning")
+            return
+        }
+        let totalParas = content.totalParagraphs
+        let paraIndex = Int(saved * Double(max(totalParas - 1, 1)))
+        scrollProgress = saved
+        if let (ci, pi) = content.chapterAndParagraph(for: paraIndex) {
+            let targetID = "p-\(content.flatIndex(chapterIndex: ci, paragraphIndex: pi))"
+            print("[HTML] restore: fraction=\(String(format: "%.4f", saved)), targetID=\(targetID)")
+            scrollPositionID = targetID
         }
     }
 
@@ -397,45 +436,13 @@ struct HTMLReaderView: View {
     }
 
     @ViewBuilder
-    private func paragraphView(text: String, flatIndex: Int, totalParas: Int) -> some View {
+    private func paragraphView(text: String) -> some View {
         Text(text)
             .font(resolvedFont)
             .foregroundStyle(theme.text)
-            // Line spacing: extra space between lines within a paragraph.
-            // Scaling factor keeps it from growing too aggressively with larger font sizes.
             .lineSpacing(CGFloat(fontSize * max(0, lineSpacing - 1.2) * 0.7))
-            // Paragraph spacing: notably larger than the per-line gap, matching CSS margin-bottom.
             .padding(.bottom, CGFloat(fontSize * lineSpacing * 0.6))
             .fixedSize(horizontal: false, vertical: true)
-            .onAppear {
-                guard flatIndex > highWaterIndex else { return }
-                highWaterIndex = flatIndex
-                let fraction = Double(flatIndex) / Double(max(totalParas - 1, 1))
-                scrollProgress = fraction
-                // Push progress to server at each new 10% milestone
-                let prevPct = Int((fraction - (1.0 / Double(max(totalParas - 1, 1)))) * 10)
-                let newPct  = Int(fraction * 10)
-                if newPct > prevPct {
-                    print("[HTML] Progress: paragraph \(flatIndex)/\(totalParas), fraction=\(String(format: "%.3f", fraction)) (\(Int(fraction * 100))%)")
-                }
-                if newPct > prevPct && newPct > lastPushedProgressMilestone {
-                    lastPushedProgressMilestone = newPct
-                    let storyID = story.id
-                    let progress = ReadingProgress(
-                        currentChapter: nil,
-                        cfi: nil,
-                        percentage: fraction,
-                        isCompleted: fraction >= 0.99,
-                        lastReadAt: nil
-                    )
-                    Task { try? await appState.makeAPIClient().saveProgress(storyID: storyID, progress: progress) }
-                }
-                if let localStory {
-                    localStory.readingProgressScrollY = fraction
-                    localStory.readingProgressPercentage = fraction * 100
-                    try? modelContext.save()
-                }
-            }
     }
 
     // MARK: - Controls overlay (header + footer rendered separately for directional transitions)
@@ -728,6 +735,13 @@ private struct LabeledSlider: View {
             Slider(value: $value, in: range, step: step)
         }
     }
+}
+
+// MARK: - Scroll offset preference key
+
+private struct ScrollOffsetKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = nextValue() }
 }
 
 // MARK: - Hex color convenience

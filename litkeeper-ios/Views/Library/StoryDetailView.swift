@@ -342,7 +342,7 @@ struct StoryDetailView: View {
                         .fontWeight(.medium)
                         .padding(.horizontal, 10)
                         .padding(.vertical, 5)
-                        .background(Capsule().fill(Color(.systemGray5)))
+                        .background(Capsule().fill(Color.primary.opacity(0.1)))
                         .foregroundStyle(.primary)
                 }
             }
@@ -457,12 +457,32 @@ struct StoryDetailView: View {
 
     private func formatDateShort(_ dateString: String) -> String {
         let iso = ISO8601DateFormatter()
+        // Try with fractional seconds + timezone (e.g. "2024-01-15T10:30:00.123456Z")
+        iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         if let date = iso.date(from: dateString) {
-            let fmt = DateFormatter()
-            fmt.dateFormat = "MMM d, yyyy"
-            return fmt.string(from: date)
+            return formatted(date)
+        }
+        // Try without fractional seconds (e.g. "2024-01-15T10:30:00Z")
+        iso.formatOptions = .withInternetDateTime
+        if let date = iso.date(from: dateString) {
+            return formatted(date)
+        }
+        // Handle Python naive datetime (no timezone): "2024-01-15T10:30:00.123456" or "2024-01-15T10:30:00"
+        let df = DateFormatter()
+        df.locale = Locale(identifier: "en_US_POSIX")
+        for format in ["yyyy-MM-dd'T'HH:mm:ss.SSSSSS", "yyyy-MM-dd'T'HH:mm:ss", "yyyy-MM-dd"] {
+            df.dateFormat = format
+            if let date = df.date(from: dateString) {
+                return formatted(date)
+            }
         }
         return dateString
+    }
+
+    private func formatted(_ date: Date) -> String {
+        let fmt = DateFormatter()
+        fmt.dateFormat = "MMM d, yyyy"
+        return fmt.string(from: date)
     }
 
     private func formatSize(_ bytes: Int) -> String {
