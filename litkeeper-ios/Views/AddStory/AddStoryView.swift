@@ -30,6 +30,7 @@ struct AddStoryView: View {
                         .font(.callout)
                         .multilineTextAlignment(.leading)
                         .frame(maxWidth: .infinity, alignment: .leading)
+                        .transition(.move(edge: .bottom).combined(with: .opacity))
                 }
 
                 Button(action: submit) {
@@ -69,8 +70,11 @@ struct AddStoryView: View {
             do {
                 let item = try await client.queueDownload(url: urlText)
                 await MainActor.run {
-                    resultMessage = "Added to queue (position \(item.id))"
-                    resultIsError = false
+                    HapticManager.shared.notify(.success)
+                    withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) {
+                        resultMessage = "Added to queue (position \(item.id))"
+                        resultIsError = false
+                    }
                     isSubmitting = false
                     urlText = ""
                 }
@@ -79,8 +83,11 @@ struct AddStoryView: View {
                 await MainActor.run { dismiss() }
             } catch {
                 await MainActor.run {
-                    resultMessage = error.localizedDescription
-                    resultIsError = true
+                    HapticManager.shared.notify(.error)
+                    withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) {
+                        resultMessage = error.localizedDescription
+                        resultIsError = true
+                    }
                     isSubmitting = false
                 }
             }

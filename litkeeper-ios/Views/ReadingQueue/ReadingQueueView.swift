@@ -43,6 +43,7 @@ struct ReadingQueueView: View {
                             .buttonStyle(.plain)
                             .swipeActions(edge: .trailing) {
                                 Button(role: .destructive) {
+                                    HapticManager.shared.notify(.warning)
                                     Task { await viewModel.removeFromQueue(story: story, appState: appState) }
                                 } label: {
                                     Label("Remove", systemImage: "minus.circle")

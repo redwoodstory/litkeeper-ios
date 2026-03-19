@@ -23,6 +23,7 @@ struct EPUBReaderView: View {
     @State private var didLogFirstLocator = false
     @State private var lastSavedFraction: Double = -1
     @State private var didReadInSession = false
+    @State private var didFireCompletionHaptic = false
 
     @AppStorage("reader.fontSize")    private var fontSize:      Double = 17
     @AppStorage("reader.lineSpacing") private var lineSpacing:   Double = 1.58
@@ -103,7 +104,14 @@ struct EPUBReaderView: View {
                         }
                         guard abs(newFraction - lastSavedFraction) >= 0.01 else { return }
                         lastSavedFraction = newFraction
-                        if newFraction > readingFraction + 0.01 { didReadInSession = true }
+                        if newFraction > readingFraction + 0.01 {
+                            didReadInSession = true
+                            HapticManager.shared.impact(.light)
+                        }
+                        if newFraction >= 0.99 && !didFireCompletionHaptic {
+                            didFireCompletionHaptic = true
+                            HapticManager.shared.notify(.success)
+                        }
                         readingFraction = newFraction
                         print("[EPUB] local save: \(Int(readingFraction * 100))% (progression=\(String(format: "%.4f", readingFraction)), href=\(locator.href))")
                         if let localStory {
@@ -113,6 +121,7 @@ struct EPUBReaderView: View {
                         }
                     },
                     onTap: {
+                        HapticManager.shared.selectionChanged()
                         withAnimation(.easeInOut(duration: 0.25)) { showControls.toggle() }
                     }
                 )

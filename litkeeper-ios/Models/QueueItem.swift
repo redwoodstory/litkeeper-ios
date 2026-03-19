@@ -1,6 +1,6 @@
 import Foundation
 
-struct QueueItem: Identifiable, Codable {
+struct QueueItem: Identifiable, Codable, Equatable {
     let id: Int
     var url: String
     var status: QueueStatus

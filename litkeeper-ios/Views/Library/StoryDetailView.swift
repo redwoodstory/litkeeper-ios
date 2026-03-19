@@ -202,12 +202,14 @@ struct StoryDetailView: View {
                 HStack(spacing: 4) {
                     Button {
                         if isDownloaded {
+                            HapticManager.shared.impact(.medium)
                             if let local = localStory {
                                 try? DownloadManager.shared.deleteLocalFiles(for: local)
                                 modelContext.delete(local)
                                 try? modelContext.save()
                             }
                         } else {
+                            HapticManager.shared.impact(.medium)
                             isSyncing = true
                             startDownload()
                         }
@@ -221,12 +223,14 @@ struct StoryDetailView: View {
                                 .font(.title)
                                 .foregroundStyle(isDownloaded ? Color.green : Color.secondary)
                                 .frame(width: 44, height: 44)
+                                .animation(.spring(response: 0.35, dampingFraction: 0.7), value: isDownloaded)
                         }
                     }
                     .buttonStyle(.plain)
                     .disabled(isSyncing)
 
                     Button {
+                        HapticManager.shared.impact(.light)
                         isInQueue.toggle()
                         let newValue = isInQueue
                         Task { try? await appState.makeAPIClient().updateQueue(storyID: story.id, inQueue: newValue) }
@@ -235,6 +239,7 @@ struct StoryDetailView: View {
                             .font(.title)
                             .foregroundStyle(isInQueue ? Color.accentColor : Color.secondary)
                             .frame(width: 44, height: 44)
+                            .animation(.spring(response: 0.35, dampingFraction: 0.7), value: isInQueue)
                     }
                     .buttonStyle(.plain)
                 }
@@ -447,7 +452,12 @@ struct StoryDetailView: View {
             } catch {
                 downloadError = error.localizedDescription
             }
-            isSyncing = false
+            await MainActor.run {
+                if downloadError == nil {
+                    HapticManager.shared.notify(.success)
+                }
+                isSyncing = false
+            }
         }
     }
 

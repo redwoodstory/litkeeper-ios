@@ -11,6 +11,7 @@ struct LibraryView: View {
     @State private var selectedStory: Story? = nil
     @State private var showAddStory = false
     @State private var showFilterSort = false
+    @State private var cardsAppeared = false
 
     private let columns = [
         GridItem(.adaptive(minimum: 100, maximum: 140), spacing: 12)
@@ -38,7 +39,7 @@ struct LibraryView: View {
                 } else {
                     ScrollView {
                         LazyVGrid(columns: columns, spacing: 16) {
-                            ForEach(viewModel.filteredStories) { story in
+                            ForEach(Array(viewModel.filteredStories.enumerated()), id: \.element.id) { index, story in
                                 Button {
                                     selectedStory = story
                                 } label: {
@@ -51,15 +52,27 @@ struct LibraryView: View {
                                         pangolinToken: appState.pangolinToken
                                     )
                                 }
-                                .buttonStyle(.plain)
+                                .buttonStyle(PressScaleButtonStyle())
+                                .opacity(cardsAppeared ? 1 : 0)
+                                .offset(y: cardsAppeared ? 0 : 12)
+                                .animation(
+                                    .spring(response: 0.4, dampingFraction: 0.8)
+                                        .delay(Double(min(index, 20)) * 0.03),
+                                    value: cardsAppeared
+                                )
                             }
                         }
                         .padding()
                     }
                     .refreshable {
                         await viewModel.refresh(appState: appState)
+                        HapticManager.shared.notify(.success)
                         Task { await syncService.syncCovers(for: viewModel.stories, serverURL: appState.serverURL, token: appState.apiToken, pangolinTokenId: appState.pangolinTokenId, pangolinToken: appState.pangolinToken) }
                         Task { await syncService.syncContent(for: viewModel.stories, serverURL: appState.serverURL, token: appState.apiToken, pangolinTokenId: appState.pangolinTokenId, pangolinToken: appState.pangolinToken, modelContext: modelContext, localStories: localStories) }
+                    }
+                    .onAppear {
+                        guard !cardsAppeared else { return }
+                        cardsAppeared = true
                     }
                 }
             }

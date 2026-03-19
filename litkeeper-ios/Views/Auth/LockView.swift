@@ -4,6 +4,8 @@ import LocalAuthentication
 struct LockView: View {
     @Environment(AppState.self) private var appState
 
+    @State private var shakeOffset: CGFloat = 0
+
     var body: some View {
         ZStack {
             Color(.systemBackground)
@@ -15,6 +17,7 @@ struct LockView: View {
                 Image(systemName: "lock.fill")
                     .font(.system(size: 60))
                     .foregroundStyle(.secondary)
+                    .offset(x: shakeOffset)
 
                 VStack(spacing: 8) {
                     Text("LitKeeper Locked")
@@ -27,7 +30,7 @@ struct LockView: View {
                 Spacer()
 
                 Button {
-                    Task { await appState.unlock() }
+                    Task { await attemptUnlock() }
                 } label: {
                     Label(biometricLabel, systemImage: biometricIcon)
                         .frame(maxWidth: .infinity)
@@ -38,7 +41,31 @@ struct LockView: View {
                 .padding(.bottom, 40)
             }
         }
-        .task { await appState.unlock() }  // auto-prompt on appear
+        .task { await attemptUnlock() }  // auto-prompt on appear
+    }
+
+    private func attemptUnlock() async {
+        await appState.unlock()
+        if appState.isLocked {
+            // Auth failed or was cancelled — shake the lock icon
+            HapticManager.shared.notify(.error)
+            await MainActor.run { triggerShake() }
+        } else {
+            HapticManager.shared.notify(.success)
+        }
+    }
+
+    private func triggerShake() {
+        let offsets: [CGFloat] = [0, -12, 12, -10, 10, -6, 6, 0]
+        var delay: Double = 0
+        for offset in offsets {
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
+                withAnimation(.easeInOut(duration: 0.06)) {
+                    shakeOffset = offset
+                }
+            }
+            delay += 0.06
+        }
     }
 
     private var biometricLabel: String {

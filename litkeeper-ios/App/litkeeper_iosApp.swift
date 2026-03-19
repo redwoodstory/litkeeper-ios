@@ -31,22 +31,30 @@ struct LitKeeperApp: App {
 
 struct RootView: View {
     @Environment(AppState.self) private var appState
+    @State private var selectedTab = 0
 
     var body: some View {
-        TabView {
+        TabView(selection: $selectedTab) {
             LibraryView()
                 .tabItem { Label("Library", systemImage: "books.vertical") }
+                .tag(0)
 
             ReadingQueueView()
                 .tabItem { Label("Reading Queue", systemImage: "list.bullet") }
+                .tag(1)
 
             QueueView()
                 .tabItem { Label("History", systemImage: "clock") }
+                .tag(2)
 
             NavigationStack {
                 SettingsView()
             }
             .tabItem { Label("Settings", systemImage: "gearshape") }
+            .tag(3)
+        }
+        .onChange(of: selectedTab) {
+            HapticManager.shared.selectionChanged()
         }
         .task { WebViewPrewarmer.shared.prewarm() }
         .fullScreenCover(isPresented: Binding(

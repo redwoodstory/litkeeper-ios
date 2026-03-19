@@ -3,6 +3,8 @@ import SwiftUI
 struct QueueView: View {
     @Environment(AppState.self) private var appState
     @State private var viewModel = QueueViewModel()
+    @State private var knownCompletedIDs: Set<Int> = []
+    @State private var knownFailedIDs: Set<Int> = []
 
     var body: some View {
         NavigationStack {
@@ -61,6 +63,18 @@ struct QueueView: View {
         }
         .onAppear { viewModel.startAutoRefresh(appState: appState) }
         .onDisappear { viewModel.stopAutoRefresh() }
+        .onChange(of: viewModel.items) { _, newItems in
+            let newCompleted = Set(newItems.filter { $0.status == .completed }.map { $0.id })
+            let newFailed    = Set(newItems.filter { $0.status == .failed }.map { $0.id })
+            if !knownCompletedIDs.isEmpty && newCompleted.subtracting(knownCompletedIDs).count > 0 {
+                HapticManager.shared.notify(.success)
+            }
+            if !knownFailedIDs.isEmpty && newFailed.subtracting(knownFailedIDs).count > 0 {
+                HapticManager.shared.notify(.error)
+            }
+            knownCompletedIDs = newCompleted
+            knownFailedIDs = newFailed
+        }
     }
 
     private func statCell(label: String, value: Int, color: Color) -> some View {
@@ -93,6 +107,7 @@ struct QueueItemRow: View {
             if item.status == .processing {
                 ProgressView(value: item.progress)
                     .tint(.blue)
+                    .animation(.easeOut(duration: 0.4), value: item.progress)
                 if let total = item.totalPages, let downloaded = item.downloadedPages {
                     Text("Page \(downloaded) of \(total)")
                         .font(.caption)

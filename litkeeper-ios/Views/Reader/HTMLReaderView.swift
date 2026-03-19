@@ -135,6 +135,7 @@ struct HTMLReaderView: View {
     @State private var lastSavedFraction: Double = -1
     @State private var lastPushedFraction: Double = -1
     @State private var serverScrollFraction: Double? = nil
+    @State private var didFireCompletionHaptic = false
 
     private var theme: ReaderTheme {
         if colorThemeRaw.isEmpty {
@@ -305,6 +306,10 @@ struct HTMLReaderView: View {
                     try? modelContext.save()
                 }
             }
+            if fraction >= 0.99 && !didFireCompletionHaptic {
+                didFireCompletionHaptic = true
+                HapticManager.shared.notify(.success)
+            }
             if fraction > lastPushedFraction + 0.05 {
                 lastPushedFraction = fraction
                 print("[HTML] server sync (in-session): \(Int(fraction * 100))% (fraction=\(String(format: "%.4f", fraction)))")
@@ -319,6 +324,7 @@ struct HTMLReaderView: View {
             }
         }
         .onTapGesture {
+            HapticManager.shared.selectionChanged()
             withAnimation(.easeInOut(duration: 0.25)) { showControls.toggle() }
         }
         .ignoresSafeArea(edges: .bottom)
@@ -470,9 +476,11 @@ struct HTMLReaderView: View {
     private var footerBar: some View {
         VStack(spacing: 4) {
             ProgressView(value: scrollProgress)
+                .animation(.linear(duration: 0.3), value: scrollProgress)
             Text("\(Int(scrollProgress * 100))%")
                 .font(.caption2.monospacedDigit())
                 .foregroundStyle(theme.secondary)
+                .contentTransition(.numericText())
         }
         .padding(.horizontal, 16)
         .padding(.top, 10)
