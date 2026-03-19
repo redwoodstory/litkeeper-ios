@@ -198,6 +198,13 @@ struct StoryDetailView: View {
                         .foregroundStyle(.secondary)
                 }
 
+                // Date added
+                if let dateAdded = story.dateAdded {
+                    Text("Added \(formatDateShort(dateAdded))")
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                }
+
                 // Offline + queue icons
                 HStack(spacing: 4) {
                     Button {
@@ -316,8 +323,6 @@ struct StoryDetailView: View {
                 statCell(value: story.pageCount.map { "\($0)" } ?? "—", label: "Pages")
                 Divider().frame(height: 36)
                 statCell(value: story.size.map { formatSize($0) } ?? "—", label: "Size")
-                Divider().frame(height: 36)
-                statCell(value: story.dateAdded.map { formatDateShort($0) } ?? "—", label: "Added")
             }
             .padding(.vertical, 4)
         }

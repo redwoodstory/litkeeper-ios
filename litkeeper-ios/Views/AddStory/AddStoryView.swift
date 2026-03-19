@@ -12,15 +12,26 @@ struct AddStoryView: View {
     var body: some View {
         NavigationStack {
             VStack(spacing: 24) {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Literotica Story URL")
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Story URL")
+                        .font(.headline)
+                    Text("Paste a Literotica story link below")
                         .font(.subheadline)
-                        .fontWeight(.semibold)
+                        .foregroundStyle(.secondary)
                     TextField("https://www.literotica.com/s/story-name", text: $urlText)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
                         .keyboardType(.URL)
-                        .textFieldStyle(.roundedBorder)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 10)
+                        .background(
+                            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                .fill(Color(.secondarySystemBackground))
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                .strokeBorder(Color(.separator), lineWidth: 0.5)
+                        )
                         .onSubmit { submit() }
                 }
 
@@ -34,14 +45,16 @@ struct AddStoryView: View {
                 }
 
                 Button(action: submit) {
-                    HStack {
-                        if isSubmitting { ProgressView().padding(.trailing, 4) }
+                    HStack(spacing: 6) {
+                        if isSubmitting { ProgressView().tint(.white) }
                         Text(isSubmitting ? "Adding…" : "Add to Queue")
                     }
-                    .frame(maxWidth: .infinity)
+                    .padding(.horizontal, 8)
                 }
                 .buttonStyle(.borderedProminent)
+                .controlSize(.large)
                 .disabled(urlText.isEmpty || isSubmitting)
+                .frame(maxWidth: .infinity, alignment: .center)
 
                 Spacer()
 
