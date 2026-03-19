@@ -24,6 +24,7 @@ struct StoryDetailView: View {
     @State private var editableDescription: String = ""
     @State private var editableTags: [String] = []
     @State private var showEditStory = false
+    @State private var safariURL: URL? = nil
 
     private var localStory: LocalStory? {
         localStories.first { $0.storyID == story.id }
@@ -110,6 +111,7 @@ struct StoryDetailView: View {
             .fullScreenCover(isPresented: $showHTMLReader) {
                 HTMLReaderView(story: story, localStory: localStory, appState: appState)
             }
+            .sheet(item: $safariURL) { SafariView(url: $0) }
             .sheet(isPresented: $showEditStory) {
                 EditStoryForm(
                     title: $editableTitle,
@@ -168,22 +170,24 @@ struct StoryDetailView: View {
                         .foregroundStyle(.primary)
                         .fixedSize(horizontal: false, vertical: true)
                     if let urlString = story.sourceURL, let url = URL(string: urlString) {
-                        Link(destination: url) {
+                        Button { safariURL = url } label: {
                             Image(systemName: "arrow.up.forward.square")
                                 .font(.subheadline)
                                 .foregroundStyle(.secondary)
                         }
+                        .buttonStyle(.plain)
                         .padding(.top, 2)
                     }
                 }
 
                 // Author
                 if let authorURL = story.authorURL, let url = URL(string: authorURL) {
-                    Link(destination: url) {
+                    Button { safariURL = url } label: {
                         Text(editableAuthor)
                             .font(.subheadline)
                             .foregroundStyle(Color.accentColor)
                     }
+                    .buttonStyle(.plain)
                 } else {
                     Text(editableAuthor)
                         .font(.subheadline)
