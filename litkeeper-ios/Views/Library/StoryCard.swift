@@ -7,8 +7,10 @@ struct StoryCard: View {
     var token: String = ""
     var pangolinTokenId: String = ""
     var pangolinToken: String = ""
+    var showCategory: Bool = false
 
     var body: some View {
+        VStack(spacing: 4) {
         ZStack(alignment: .topTrailing) {
             CoverImageView(url: coverURL, title: story.title, author: story.author, token: token, pangolinTokenId: pangolinTokenId, pangolinToken: pangolinToken)
                 .aspectRatio(2/3, contentMode: .fit)
@@ -29,6 +31,16 @@ struct StoryCard: View {
             }
             .padding(5)
         }
+        if showCategory, let category = story.category {
+            Text(category)
+                .font(.caption2)
+                .fontWeight(.medium)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .truncationMode(.middle)
+                .frame(maxWidth: .infinity, alignment: .center)
+        }
+        } // end VStack
     }
 
     private func badge(_ systemName: String, color: Color) -> some View {

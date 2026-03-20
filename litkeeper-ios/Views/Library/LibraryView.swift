@@ -49,7 +49,8 @@ struct LibraryView: View {
                                         coverURL: coverURL(for: story),
                                         token: appState.apiToken,
                                         pangolinTokenId: appState.pangolinTokenId,
-                                        pangolinToken: appState.pangolinToken
+                                        pangolinToken: appState.pangolinToken,
+                                        showCategory: viewModel.showCategoryLabel
                                     )
                                 }
                                 .buttonStyle(PressScaleButtonStyle())
@@ -105,6 +106,7 @@ struct LibraryView: View {
                     sortBy: $viewModel.sortBy,
                     sortAscending: $viewModel.sortAscending,
                     showQueueOnly: $viewModel.showQueueOnly,
+                    showCategoryLabel: $viewModel.showCategoryLabel,
                     categories: viewModel.availableCategories
                 )
             }

@@ -5,6 +5,7 @@ struct FilterSortView: View {
     @Binding var sortBy: LibraryViewModel.SortOption
     @Binding var sortAscending: Bool
     @Binding var showQueueOnly: Bool
+    @Binding var showCategoryLabel: Bool
     let categories: [String]
 
     @Environment(\.dismiss) private var dismiss
@@ -31,12 +32,17 @@ struct FilterSortView: View {
                     Toggle("Reading Queue Only", isOn: $showQueueOnly)
                 }
 
+                Section("Display") {
+                    Toggle("Show Category", isOn: $showCategoryLabel)
+                }
+
                 Section {
                     Button("Reset Filters") {
                         selectedCategory = nil
                         sortBy = .dateAdded
                         sortAscending = false
                         showQueueOnly = false
+                        showCategoryLabel = false
                     }
                     .foregroundStyle(.red)
                 }
