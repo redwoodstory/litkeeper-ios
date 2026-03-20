@@ -1,6 +1,6 @@
 # LitKeeper for iOS
 
-A native SwiftUI companion app for [LitKeeper](../LitKeeper/README.md). Browse your library, manage the download queue, and read stories offline.
+A native SwiftUI companion app for [LitKeeper](https://github.com/redwoodstory/LitKeeper). Browse your library, manage the download queue, and read stories offline.
 
 ## Requirements
 
@@ -37,11 +37,11 @@ The app has built-in support for [Pangolin](https://github.com/fosrl/pangolin) r
 
 Find these under **Share Link** in the Pangolin dashboard. Leave both fields blank for direct LAN access — the headers are omitted when empty.
 
-> These Pangolin credentials and the LitKeeper API token serve different purposes and are both required for external access. See the [server security docs](../LitKeeper/README.md#security) for an explanation of the full auth model.
+> These Pangolin credentials and the LitKeeper API token serve different purposes and are both required for external access. See the [server security docs](https://github.com/redwoodstory/LitKeeper?tab=readme-ov-file#security) for an explanation of the full auth model.
 
 ## Security
 
-**Biometric Lock** — enable under **Settings → Security** to lock the app whenever it moves to the background. Face ID or Touch ID (with passcode fallback) is used to unlock.
+**Biometric Lock** — enable under **Settings → Security** to lock the app whenever it moves to the background. Face ID or Touch ID is used to unlock.
 
 The app does not participate in the server's PIN lock system. The server PIN lock applies only to browser sessions; Bearer-token-authenticated API requests (which the app uses) bypass it automatically.
 
