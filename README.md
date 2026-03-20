@@ -28,27 +28,16 @@ Open **Settings → Server & Token** and enter:
 
 Tap **Test Connection** to verify. The token is stored in the device Keychain.
 
-## Accessing from Outside Your LAN
+## Accessing from Outside Your LAN via Pangolin
 
-When accessing LitKeeper through a reverse proxy (e.g. Pangolin) from outside your LAN, the proxy may require additional authentication headers on each request.
+The app has built-in support for [Pangolin](https://github.com/fosrl/pangolin) reverse proxy authentication. When your LitKeeper server is behind Pangolin, configure your access tokens under **Settings → Server → Pangolin Access Control**:
 
-Configure these under **Settings → Server & Token → External Proxy**:
+- **Token ID** — the value for the `P-Access-Token-Id` header
+- **Token** — the value for the `P-Access-Token` header
 
-- **Header 1 Name / Value** — first proxy auth header
-- **Header 2 Name / Value** — optional second header
+Find these under **Share Link** in the Pangolin dashboard. Leave both fields blank for direct LAN access — the headers are omitted when empty.
 
-For **Pangolin**, use:
-
-| Field | Value |
-|-------|-------|
-| Header 1 Name | `P-Access-Token-Id` |
-| Header 1 Value | your Pangolin token ID |
-| Header 2 Name | `P-Access-Token` |
-| Header 2 Value | your Pangolin token secret |
-
-These headers are sent on every request when configured. Leave them blank for direct LAN access — they are not sent when empty.
-
-> The proxy headers and the API token serve different purposes and are both required for external access. See the [server security docs](../LitKeeper/README.md#security) for an explanation of the full auth model.
+> These Pangolin credentials and the LitKeeper API token serve different purposes and are both required for external access. See the [server security docs](../LitKeeper/README.md#security) for an explanation of the full auth model.
 
 ## Security
 
