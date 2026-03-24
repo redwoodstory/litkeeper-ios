@@ -56,7 +56,6 @@ struct RootView: View {
         .onChange(of: selectedTab) {
             HapticManager.shared.selectionChanged()
         }
-        .task { WebViewPrewarmer.shared.prewarm() }
         .fullScreenCover(isPresented: Binding(
             get: { appState.isLocked },
             set: { _ in }

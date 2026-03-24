@@ -14,7 +14,6 @@ struct StoryDetailView: View {
     @State private var currentRating: Int?
     @State private var showDeleteConfirm = false
     @State private var showResetProgressConfirm = false
-    @State private var showEPUBReader = false
     @State private var showHTMLReader = false
     @State private var isSyncing = false
     @State private var isInQueue = false
@@ -31,7 +30,6 @@ struct StoryDetailView: View {
     }
 
     private var isDownloaded: Bool { localStory != nil }
-    private var canReadEPUB: Bool { localStory?.hasEPUB == true }
     private var canReadHTML: Bool { story.hasHTML }
 
     var body: some View {
@@ -71,11 +69,6 @@ struct StoryDetailView: View {
             .navigationTitle("")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .navigationBarLeading) {
-                    Button { showEditStory = true } label: {
-                        Image(systemName: "pencil")
-                    }
-                }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Done") { dismiss() }
                         .fontWeight(.semibold)
@@ -104,9 +97,6 @@ struct StoryDetailView: View {
                 }
             } message: {
                 Text("This permanently removes the story from the server and device.")
-            }
-            .fullScreenCover(isPresented: $showEPUBReader) {
-                EPUBReaderView(story: story, localStory: localStory, appState: appState)
             }
             .fullScreenCover(isPresented: $showHTMLReader) {
                 HTMLReaderView(story: story, localStory: localStory, appState: appState)
@@ -277,26 +267,11 @@ struct StoryDetailView: View {
         Section {
             HStack(spacing: 10) {
                 Button {
-                    showEPUBReader = true
-                } label: {
-                    HStack(spacing: 6) {
-                        Image(systemName: "book.fill")
-                        Text("Read EPUB")
-                            .fontWeight(.semibold)
-                    }
-                    .frame(maxWidth: .infinity)
-                    .frame(height: 50)
-                }
-                .buttonStyle(.bordered)
-                .tint(.accentColor)
-                .disabled(!canReadEPUB)
-
-                Button {
                     showHTMLReader = true
                 } label: {
                     HStack(spacing: 6) {
                         Image(systemName: "doc.text")
-                        Text("Read HTML")
+                        Text("Read")
                             .fontWeight(.semibold)
                     }
                     .frame(maxWidth: .infinity)
@@ -305,6 +280,24 @@ struct StoryDetailView: View {
                 .buttonStyle(.bordered)
                 .tint(.accentColor)
                 .disabled(!canReadHTML)
+
+                Button {
+                    HapticManager.shared.impact(.light)
+                    isInQueue.toggle()
+                    let newValue = isInQueue
+                    Task { try? await appState.makeAPIClient().updateQueue(storyID: story.id, inQueue: newValue) }
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: isInQueue ? "bookmark.fill" : "bookmark")
+                        Text(isInQueue ? "In Queue" : "Add to Queue")
+                            .fontWeight(.semibold)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 50)
+                    .animation(.spring(response: 0.35, dampingFraction: 0.7), value: isInQueue)
+                }
+                .buttonStyle(.bordered)
+                .tint(isInQueue ? .accentColor : .secondary)
             }
             .listRowInsets(EdgeInsets(top: 12, leading: 16, bottom: 12, trailing: 16))
 
@@ -394,16 +387,36 @@ struct StoryDetailView: View {
     @ViewBuilder
     private var utilitySection: some View {
         Section {
-            Button(role: .destructive) {
-                showDeleteConfirm = true
-            } label: {
-                HStack {
-                    Image(systemName: "trash")
-                        .foregroundStyle(.red)
-                    Text("Delete from Library")
-                        .foregroundStyle(.red)
+            HStack(spacing: 10) {
+                Button {
+                    showEditStory = true
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: "pencil")
+                        Text("Edit Metadata")
+                            .fontWeight(.medium)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 44)
                 }
+                .buttonStyle(.bordered)
+                .tint(.secondary)
+
+                Button(role: .destructive) {
+                    showDeleteConfirm = true
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: "trash")
+                        Text("Delete")
+                            .fontWeight(.medium)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 44)
+                }
+                .buttonStyle(.bordered)
+                .tint(.red)
             }
+            .listRowInsets(EdgeInsets(top: 12, leading: 16, bottom: 12, trailing: 16))
         }
     }
 
