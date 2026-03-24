@@ -130,12 +130,10 @@ struct HTMLReaderView: View {
     @State private var showControls = true
     @State private var showSettings = false
     @State private var scrollProgress: Double = 0
-    @State private var scrollPositionID: String?
-    @State private var didRestorePosition = false
-    @State private var lastSavedFraction: Double = -1
     @State private var lastPushedFraction: Double = -1
     @State private var serverScrollFraction: Double? = nil
     @State private var didFireCompletionHaptic = false
+    @State private var readerItems: [ReaderItem] = []
 
     private var theme: ReaderTheme {
         if colorThemeRaw.isEmpty {
@@ -214,24 +212,25 @@ struct HTMLReaderView: View {
 
     // MARK: - Reader items (flattened for true laziness)
 
+    private static let chunkSize = 15
+
     private enum ReaderItem: Identifiable {
         case header
         case chapterDivider(chapterIndex: Int)
         case chapterTitle(chapterIndex: Int, title: String)
-        case paragraph(flatIndex: Int, text: String, totalParas: Int)
+        case paragraphChunk(startFlatIndex: Int, texts: [String])
 
         var id: String {
             switch self {
-            case .header:                         return "header"
-            case .chapterDivider(let ci):         return "div-\(ci)"
-            case .chapterTitle(let ci, _):        return "title-\(ci)"
-            case .paragraph(let fi, _, _):        return "p-\(fi)"
+            case .header:                            return "header"
+            case .chapterDivider(let ci):            return "div-\(ci)"
+            case .chapterTitle(let ci, _):           return "title-\(ci)"
+            case .paragraphChunk(let sfi, _):        return "chunk-\(sfi)"
             }
         }
     }
 
     private func buildItems(content: StoryContent) -> [ReaderItem] {
-        let totalParas = content.totalParagraphs
         var items: [ReaderItem] = [.header]
         for (ci, chapter) in content.chapters.enumerated() {
             if ci > 0 { items.append(.chapterDivider(chapterIndex: ci)) }
@@ -239,8 +238,11 @@ struct HTMLReaderView: View {
                 items.append(.chapterTitle(chapterIndex: ci, title: title))
             }
             let chapterStart = content.flatIndex(chapterIndex: ci, paragraphIndex: 0)
-            for (pi, text) in chapter.paragraphs.enumerated() {
-                items.append(.paragraph(flatIndex: chapterStart + pi, text: text, totalParas: totalParas))
+            var idx = 0
+            while idx < chapter.paragraphs.count {
+                let slice = Array(chapter.paragraphs[idx..<min(idx + Self.chunkSize, chapter.paragraphs.count)])
+                items.append(.paragraphChunk(startFlatIndex: chapterStart + idx, texts: slice))
+                idx += Self.chunkSize
             }
         }
         return items
@@ -250,129 +252,131 @@ struct HTMLReaderView: View {
 
     @ViewBuilder
     private func readerBody(content: StoryContent) -> some View {
-        ScrollView(.vertical) {
-            VStack(alignment: .leading, spacing: 0) {
-                ForEach(buildItems(content: content)) { item in
-                    switch item {
-                    case .header:
-                        storyHeader(content: content)
-                    case .chapterDivider:
-                        HStack {
-                            Spacer()
-                            Text("◆  ◆  ◆")
-                                .font(.caption)
-                                .foregroundStyle(theme.secondary.opacity(0.5))
-                            Spacer()
+        ScrollViewReader { proxy in
+            ScrollView(.vertical) {
+                VStack(alignment: .leading, spacing: 0) {
+                    ForEach(readerItems) { item in
+                        switch item {
+                        case .header:
+                            storyHeader(content: content)
+                        case .chapterDivider:
+                            HStack {
+                                Spacer()
+                                Text("◆  ◆  ◆")
+                                    .font(.caption)
+                                    .foregroundStyle(theme.secondary.opacity(0.5))
+                                Spacer()
+                            }
+                            .padding(.vertical, 36)
+                        case .chapterTitle(_, let title):
+                            VStack(alignment: .leading, spacing: 8) {
+                                Text(title)
+                                    .font(.title2.weight(.semibold))
+                                    .foregroundStyle(theme.text)
+                                Rectangle()
+                                    .fill(theme.border)
+                                    .frame(height: 1.5)
+                            }
+                            .padding(.bottom, 24)
+                        case .paragraphChunk(_, let texts):
+                            VStack(alignment: .leading, spacing: 0) {
+                                ForEach(texts.indices, id: \.self) { i in
+                                    paragraphView(text: texts[i])
+                                }
+                            }
                         }
-                        .padding(.vertical, 36)
-                    case .chapterTitle(_, let title):
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text(title)
-                                .font(.title2.weight(.semibold))
-                                .foregroundStyle(theme.text)
-                            Rectangle()
-                                .fill(theme.border)
-                                .frame(height: 1.5)
-                        }
-                        .padding(.bottom, 24)
-                    case .paragraph(_, let text, _):
-                        paragraphView(text: text)
                     }
+                    Color.clear.frame(height: 32)
                 }
-                Color.clear.frame(height: 32)
+                .padding(.horizontal, CGFloat(hPadding))
+                .padding(.top, 80)
+                .padding(.bottom, 20)
             }
-            .padding(.horizontal, CGFloat(hPadding))
-            .padding(.top, 80)
-            .padding(.bottom, 20)
-        }
-        .background(theme.background)
-        .scrollPosition(id: $scrollPositionID, anchor: .top)
-        .onScrollGeometryChange(for: Double.self) { geo in
-            let offset = max(geo.contentOffset.y - geo.contentInsets.top, 0)
-            let maxScroll = max(geo.contentSize.height - geo.containerSize.height, 1)
-            return min(offset / maxScroll, 1)
-        } action: { _, fraction in
-            guard didRestorePosition else {
-                restorePositionIfNeeded()
-                return
+            .background(theme.background)
+            .onScrollGeometryChange(for: Double.self) { geo in
+                let offset = max(geo.contentOffset.y - geo.contentInsets.top, 0)
+                let maxScroll = max(geo.contentSize.height - geo.containerSize.height, 1)
+                let raw = min(offset / maxScroll, 1)
+                return (raw * 200).rounded() / 200
+            } action: { _, fraction in
+                scrollProgress = fraction
+                if fraction >= 0.99 && !didFireCompletionHaptic {
+                    didFireCompletionHaptic = true
+                    HapticManager.shared.notify(.success)
+                }
             }
-            scrollProgress = fraction
-            if abs(fraction - lastSavedFraction) >= 0.01 {
-                lastSavedFraction = fraction
-                print("[HTML] local save: \(Int(fraction * 100))% (scrollY=\(String(format: "%.4f", fraction)))")
+            .onScrollPhaseChange { _, newPhase in
+                guard newPhase == .idle else { return }
+                let fraction = scrollProgress
+                print("[HTML] scroll idle — saving \(Int(fraction * 100))%")
                 if let localStory {
                     localStory.readingProgressScrollY = fraction
                     localStory.readingProgressPercentage = fraction * 100
-                    try? modelContext.save()
+                }
+                if fraction > lastPushedFraction + 0.05 {
+                    lastPushedFraction = fraction
+                    print("[HTML] server sync (idle): \(Int(fraction * 100))%")
+                    let storyID = story.id
+                    let progress = ReadingProgress(
+                        currentChapter: nil, cfi: nil,
+                        percentage: fraction,
+                        isCompleted: fraction >= 0.99,
+                        lastReadAt: nil
+                    )
+                    Task { try? await appState.makeAPIClient().saveProgress(storyID: storyID, progress: progress) }
                 }
             }
-            if fraction >= 0.99 && !didFireCompletionHaptic {
-                didFireCompletionHaptic = true
-                HapticManager.shared.notify(.success)
+            .task(id: readerItems.isEmpty) {
+                guard !readerItems.isEmpty else { return }
+                let c = content
+                let localFraction = localStory?.readingProgressScrollY ?? 0
+                let serverFraction = serverScrollFraction ?? 0
+                let saved = max(localFraction, serverFraction)
+                guard saved > 0 else {
+                    print("[HTML] restore: no saved progress, starting at beginning")
+                    return
+                }
+                print("[HTML] restore: local=\(Int(localFraction * 100))% server=\(Int(serverFraction * 100))% → using \(Int(saved * 100))%")
+                let paraIndex = Int(saved * Double(max(c.totalParagraphs - 1, 1)))
+                guard let (ci, pi) = c.chapterAndParagraph(for: paraIndex) else { return }
+                let flatIndex = c.flatIndex(chapterIndex: ci, paragraphIndex: pi)
+                let chunkStart = (flatIndex / Self.chunkSize) * Self.chunkSize
+                let targetID = "chunk-\(chunkStart)"
+                scrollProgress = saved
+                print("[HTML] restore: fraction=\(String(format: "%.4f", saved)), targetID=\(targetID)")
+                // Yield one layout pass so the VStack is fully measured before scrolling
+                try? await Task.sleep(for: .milliseconds(50))
+                withAnimation(.none) { proxy.scrollTo(targetID, anchor: .top) }
             }
-            if fraction > lastPushedFraction + 0.05 {
-                lastPushedFraction = fraction
-                print("[HTML] server sync (in-session): \(Int(fraction * 100))% (fraction=\(String(format: "%.4f", fraction)))")
-                let storyID = story.id
-                let progress = ReadingProgress(
-                    currentChapter: nil, cfi: nil,
-                    percentage: fraction,
-                    isCompleted: fraction >= 0.99,
-                    lastReadAt: nil
+            .onTapGesture {
+                HapticManager.shared.selectionChanged()
+                withAnimation(.easeInOut(duration: 0.25)) { showControls.toggle() }
+            }
+            .ignoresSafeArea(edges: .bottom)
+            .overlay(alignment: .top) {
+                if showControls {
+                    headerBar
+                        .transition(.move(edge: .top).combined(with: .opacity))
+                }
+            }
+            .overlay(alignment: .bottom) {
+                if showControls {
+                    footerBar
+                        .transition(.move(edge: .bottom).combined(with: .opacity))
+                }
+            }
+            .animation(.easeInOut(duration: 0.25), value: showControls)
+            .sheet(isPresented: $showSettings) {
+                ReaderSettingsView(
+                    fontSize: $fontSize,
+                    lineSpacing: $lineSpacing,
+                    hPadding: $hPadding,
+                    fontKey: $fontKey,
+                    colorThemeRaw: $colorThemeRaw
                 )
-                Task { try? await appState.makeAPIClient().saveProgress(storyID: storyID, progress: progress) }
+                .presentationDetents([.large])
+                .presentationDragIndicator(.visible)
             }
-        }
-        .onTapGesture {
-            HapticManager.shared.selectionChanged()
-            withAnimation(.easeInOut(duration: 0.25)) { showControls.toggle() }
-        }
-        .ignoresSafeArea(edges: .bottom)
-        .overlay(alignment: .top) {
-            if showControls {
-                headerBar
-                    .transition(.move(edge: .top).combined(with: .opacity))
-            }
-        }
-        .overlay(alignment: .bottom) {
-            if showControls {
-                footerBar
-                    .transition(.move(edge: .bottom).combined(with: .opacity))
-            }
-        }
-        .animation(.easeInOut(duration: 0.25), value: showControls)
-        .sheet(isPresented: $showSettings) {
-            ReaderSettingsView(
-                fontSize: $fontSize,
-                lineSpacing: $lineSpacing,
-                hPadding: $hPadding,
-                fontKey: $fontKey,
-                colorThemeRaw: $colorThemeRaw
-            )
-            .presentationDetents([.large])
-            .presentationDragIndicator(.visible)
-        }
-    }
-
-    private func restorePositionIfNeeded() {
-        guard !didRestorePosition else { return }
-        guard let content else { return }
-        didRestorePosition = true
-        let localFraction = localStory?.readingProgressScrollY ?? 0
-        let serverFraction = serverScrollFraction ?? 0
-        let saved = max(localFraction, serverFraction)
-        guard saved > 0 else {
-            print("[HTML] restore: no saved progress, starting at beginning")
-            return
-        }
-        print("[HTML] restore: local=\(Int(localFraction * 100))% server=\(Int(serverFraction * 100))% → using \(Int(saved * 100))%")
-        let totalParas = content.totalParagraphs
-        let paraIndex = Int(saved * Double(max(totalParas - 1, 1)))
-        scrollProgress = saved
-        if let (ci, pi) = content.chapterAndParagraph(for: paraIndex) {
-            let targetID = "p-\(content.flatIndex(chapterIndex: ci, paragraphIndex: pi))"
-            print("[HTML] restore: fraction=\(String(format: "%.4f", saved)), targetID=\(targetID)")
-            scrollPositionID = targetID
         }
     }
 
@@ -572,8 +576,10 @@ struct HTMLReaderView: View {
         }
 
         // ── 3. Commit to main thread ──────────────────────────────────────
+        let items = buildItems(content: decoded)
         await MainActor.run {
             content = decoded
+            readerItems = items
             serverScrollFraction = progressFraction
             isLoading = false
         }
