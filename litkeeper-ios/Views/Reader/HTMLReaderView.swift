@@ -130,6 +130,9 @@ struct HTMLReaderView: View {
     @State private var showControls = true
     @State private var showSettings = false
     @State private var scrollProgress: Double = 0
+    @State private var scrollPos = ScrollPosition(edge: .top)
+    @State private var contentHeight: CGFloat = 0
+    @State private var hasRestoredPosition = false
     @State private var lastPushedFraction: Double = -1
     @State private var serverScrollFraction: Double? = nil
     @State private var didFireCompletionHaptic = false
@@ -252,131 +255,143 @@ struct HTMLReaderView: View {
 
     @ViewBuilder
     private func readerBody(content: StoryContent) -> some View {
-        ScrollViewReader { proxy in
-            ScrollView(.vertical) {
-                VStack(alignment: .leading, spacing: 0) {
-                    ForEach(readerItems) { item in
-                        switch item {
-                        case .header:
-                            storyHeader(content: content)
-                        case .chapterDivider:
-                            HStack {
-                                Spacer()
-                                Text("◆  ◆  ◆")
-                                    .font(.caption)
-                                    .foregroundStyle(theme.secondary.opacity(0.5))
-                                Spacer()
-                            }
-                            .padding(.vertical, 36)
-                        case .chapterTitle(_, let title):
-                            VStack(alignment: .leading, spacing: 8) {
-                                Text(title)
-                                    .font(.title2.weight(.semibold))
-                                    .foregroundStyle(theme.text)
-                                Rectangle()
-                                    .fill(theme.border)
-                                    .frame(height: 1.5)
-                            }
-                            .padding(.bottom, 24)
-                        case .paragraphChunk(_, let texts):
-                            VStack(alignment: .leading, spacing: 0) {
-                                ForEach(texts.indices, id: \.self) { i in
-                                    paragraphView(text: texts[i])
-                                }
+        ScrollView(.vertical) {
+            VStack(alignment: .leading, spacing: 0) {
+                ForEach(readerItems) { item in
+                    switch item {
+                    case .header:
+                        storyHeader(content: content)
+                    case .chapterDivider:
+                        HStack {
+                            Spacer()
+                            Text("◆  ◆  ◆")
+                                .font(.caption)
+                                .foregroundStyle(theme.secondary.opacity(0.5))
+                            Spacer()
+                        }
+                        .padding(.vertical, 36)
+                    case .chapterTitle(_, let title):
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text(title)
+                                .font(.title2.weight(.semibold))
+                                .foregroundStyle(theme.text)
+                            Rectangle()
+                                .fill(theme.border)
+                                .frame(height: 1.5)
+                        }
+                        .padding(.bottom, 24)
+                    case .paragraphChunk(_, let texts):
+                        VStack(alignment: .leading, spacing: 0) {
+                            ForEach(texts.indices, id: \.self) { i in
+                                paragraphView(text: texts[i])
                             }
                         }
                     }
-                    Color.clear.frame(height: 32)
                 }
-                .padding(.horizontal, CGFloat(hPadding))
-                .padding(.top, 80)
-                .padding(.bottom, 20)
+                Color.clear.frame(height: 32)
             }
-            .background(theme.background)
-            .onScrollGeometryChange(for: Double.self) { geo in
-                let offset = max(geo.contentOffset.y - geo.contentInsets.top, 0)
-                let maxScroll = max(geo.contentSize.height - geo.containerSize.height, 1)
-                let raw = min(offset / maxScroll, 1)
-                return (raw * 200).rounded() / 200
-            } action: { _, fraction in
-                scrollProgress = fraction
-                if fraction >= 0.99 && !didFireCompletionHaptic {
-                    didFireCompletionHaptic = true
-                    HapticManager.shared.notify(.success)
-                }
+            .padding(.horizontal, CGFloat(hPadding))
+            .padding(.top, 80)
+            .padding(.bottom, 20)
+        }
+        .scrollPosition($scrollPos)
+        .background(theme.background)
+        .overlay {
+            if !hasRestoredPosition {
+                theme.background.ignoresSafeArea()
             }
-            .onScrollPhaseChange { _, newPhase in
-                guard newPhase == .idle else { return }
-                let fraction = scrollProgress
-                print("[HTML] scroll idle — saving \(Int(fraction * 100))%")
-                if let localStory {
-                    localStory.readingProgressScrollY = fraction
-                    localStory.readingProgressPercentage = fraction * 100
-                }
-                if fraction > lastPushedFraction + 0.05 {
-                    lastPushedFraction = fraction
-                    print("[HTML] server sync (idle): \(Int(fraction * 100))%")
-                    let storyID = story.id
-                    let progress = ReadingProgress(
-                        currentChapter: nil, cfi: nil,
-                        percentage: fraction,
-                        isCompleted: fraction >= 0.99,
-                        lastReadAt: nil
-                    )
-                    Task { try? await appState.makeAPIClient().saveProgress(storyID: storyID, progress: progress) }
-                }
+        }
+        // Capture content height for pixel-precise restoration
+        .onScrollGeometryChange(for: CGFloat.self) { $0.contentSize.height } action: { _, h in
+            contentHeight = h
+        }
+        // Track scroll fraction for footer and progress saving
+        .onScrollGeometryChange(for: Double.self) { geo in
+            let offset = max(geo.contentOffset.y - geo.contentInsets.top, 0)
+            let maxScroll = max(geo.contentSize.height - geo.containerSize.height, 1)
+            let raw = min(offset / maxScroll, 1)
+            return (raw * 200).rounded() / 200
+        } action: { _, fraction in
+            scrollProgress = fraction
+            if fraction >= 0.99 && !didFireCompletionHaptic {
+                didFireCompletionHaptic = true
+                HapticManager.shared.notify(.success)
             }
-            .task(id: readerItems.isEmpty) {
-                guard !readerItems.isEmpty else { return }
-                let c = content
-                let localFraction = localStory?.readingProgressScrollY ?? 0
-                let serverFraction = serverScrollFraction ?? 0
-                let saved = max(localFraction, serverFraction)
-                guard saved > 0 else {
-                    print("[HTML] restore: no saved progress, starting at beginning")
-                    return
-                }
-                print("[HTML] restore: local=\(Int(localFraction * 100))% server=\(Int(serverFraction * 100))% → using \(Int(saved * 100))%")
-                let paraIndex = Int(saved * Double(max(c.totalParagraphs - 1, 1)))
-                guard let (ci, pi) = c.chapterAndParagraph(for: paraIndex) else { return }
-                let flatIndex = c.flatIndex(chapterIndex: ci, paragraphIndex: pi)
-                let chunkStart = (flatIndex / Self.chunkSize) * Self.chunkSize
-                let targetID = "chunk-\(chunkStart)"
-                scrollProgress = saved
-                print("[HTML] restore: fraction=\(String(format: "%.4f", saved)), targetID=\(targetID)")
-                // Yield one layout pass so the VStack is fully measured before scrolling
-                try? await Task.sleep(for: .milliseconds(50))
-                withAnimation(.none) { proxy.scrollTo(targetID, anchor: .top) }
+        }
+        .onScrollPhaseChange { _, newPhase in
+            guard newPhase == .idle, hasRestoredPosition else { return }
+            let fraction = scrollProgress
+            print("[HTML] scroll idle — saving \(Int(fraction * 100))%")
+            if let localStory {
+                localStory.readingProgressScrollY = fraction
+                localStory.readingProgressPercentage = fraction * 100
             }
-            .onTapGesture {
-                HapticManager.shared.selectionChanged()
-                withAnimation(.easeInOut(duration: 0.25)) { showControls.toggle() }
-            }
-            .ignoresSafeArea(edges: .bottom)
-            .overlay(alignment: .top) {
-                if showControls {
-                    headerBar
-                        .transition(.move(edge: .top).combined(with: .opacity))
-                }
-            }
-            .overlay(alignment: .bottom) {
-                if showControls {
-                    footerBar
-                        .transition(.move(edge: .bottom).combined(with: .opacity))
-                }
-            }
-            .animation(.easeInOut(duration: 0.25), value: showControls)
-            .sheet(isPresented: $showSettings) {
-                ReaderSettingsView(
-                    fontSize: $fontSize,
-                    lineSpacing: $lineSpacing,
-                    hPadding: $hPadding,
-                    fontKey: $fontKey,
-                    colorThemeRaw: $colorThemeRaw
+            if fraction > lastPushedFraction + 0.05 {
+                lastPushedFraction = fraction
+                print("[HTML] server sync (idle): \(Int(fraction * 100))%")
+                let storyID = story.id
+                let progress = ReadingProgress(
+                    currentChapter: nil, cfi: nil,
+                    percentage: fraction,
+                    isCompleted: fraction >= 0.99,
+                    lastReadAt: nil
                 )
-                .presentationDetents([.large])
-                .presentationDragIndicator(.visible)
+                Task { try? await appState.makeAPIClient().saveProgress(storyID: storyID, progress: progress) }
             }
+        }
+        .task(id: readerItems.isEmpty) {
+            guard !readerItems.isEmpty else { return }
+            let localFraction = localStory?.readingProgressScrollY ?? 0
+            let serverFraction = serverScrollFraction ?? 0
+            let saved = max(localFraction, serverFraction)
+            guard saved > 0 else {
+                print("[HTML] restore: no saved progress, starting at beginning")
+                withAnimation(.easeIn(duration: 0.15)) { hasRestoredPosition = true }
+                return
+            }
+            print("[HTML] restore: local=\(Int(localFraction * 100))% server=\(Int(serverFraction * 100))% → using \(Int(saved * 100))%")
+            scrollProgress = saved
+            // Wait for the VStack to lay out and contentHeight to be populated
+            try? await Task.sleep(for: .milliseconds(100))
+            guard contentHeight > 0 else {
+                hasRestoredPosition = true
+                return
+            }
+            let targetY = saved * contentHeight
+            print("[HTML] restore: fraction=\(String(format: "%.4f", saved)), targetY=\(String(format: "%.1f", targetY))/\(String(format: "%.1f", contentHeight))")
+            withAnimation(.none) {
+                scrollPos = ScrollPosition(point: CGPoint(x: 0, y: targetY))
+            }
+            withAnimation(.easeIn(duration: 0.15)) { hasRestoredPosition = true }
+        }
+        .onTapGesture {
+            HapticManager.shared.selectionChanged()
+            withAnimation(.easeInOut(duration: 0.25)) { showControls.toggle() }
+        }
+        .ignoresSafeArea(edges: .bottom)
+        .overlay(alignment: .top) {
+            if showControls {
+                headerBar
+                    .transition(.move(edge: .top).combined(with: .opacity))
+            }
+        }
+        .overlay(alignment: .bottom) {
+            if showControls {
+                footerBar
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+        }
+        .animation(.easeInOut(duration: 0.25), value: showControls)
+        .sheet(isPresented: $showSettings) {
+            ReaderSettingsView(
+                fontSize: $fontSize,
+                lineSpacing: $lineSpacing,
+                hPadding: $hPadding,
+                fontKey: $fontKey,
+                colorThemeRaw: $colorThemeRaw
+            )
+            .presentationDetents([.large])
+            .presentationDragIndicator(.visible)
         }
     }
 
