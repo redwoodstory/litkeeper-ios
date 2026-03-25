@@ -462,14 +462,19 @@ struct HTMLReaderView: View {
             .presentationDetents([.large])
             .presentationDragIndicator(.visible)
         }
-        .confirmationDialog("Save this passage as a quote?", isPresented: $showSaveQuoteDialog, titleVisibility: .visible) {
-            Button("Save Quote") {
-                if let ci = pendingQuoteChapter, let pi = pendingQuoteParagraph {
-                    let text = pendingQuoteText
-                    Task { await saveQuote(chapterIndex: ci, paragraphIndex: pi, rawHTML: text) }
+        .sheet(isPresented: $showSaveQuoteDialog) {
+            SaveQuoteSheet(
+                text: pendingQuoteText,
+                onSave: {
+                    if let ci = pendingQuoteChapter, let pi = pendingQuoteParagraph {
+                        let text = pendingQuoteText
+                        Task { await saveQuote(chapterIndex: ci, paragraphIndex: pi, rawHTML: text) }
+                    }
                 }
-            }
-            Button("Cancel", role: .cancel) {}
+            )
+            .presentationDetents([.height(360)])
+            .presentationCornerRadius(20)
+            .presentationDragIndicator(.visible)
         }
         .alert("Quote Saved", isPresented: $quoteAlertVisible) {
             Button("OK", role: .cancel) {}
@@ -997,6 +1002,73 @@ private struct LabeledSlider: View {
                     .foregroundStyle(.secondary)
             }
             Slider(value: $value, in: range, step: step)
+        }
+    }
+}
+
+// MARK: - Save quote sheet
+
+struct SaveQuoteSheet: View {
+    let text: String
+    let onSave: () -> Void
+    @Environment(\.dismiss) private var dismiss
+
+    private var cleanText: String {
+        text
+            .replacingOccurrences(of: "<[^>]+>", with: "", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            VStack(alignment: .leading, spacing: 0) {
+                Text("\u{201C}")
+                    .font(.system(size: 72, weight: .bold, design: .serif))
+                    .foregroundStyle(.quaternary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.bottom, -28)
+
+                ScrollView {
+                    Text(cleanText)
+                        .font(.body)
+                        .italic()
+                        .lineSpacing(5)
+                        .foregroundStyle(.primary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .frame(maxHeight: 180)
+
+}
+            .padding(.horizontal, 28)
+            .padding(.top, 24)
+            .padding(.bottom, 20)
+
+            Divider()
+
+            VStack(spacing: 8) {
+                Button {
+                    onSave()
+                    dismiss()
+                } label: {
+                    Text("Save Quote")
+                        .font(.body.weight(.semibold))
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 50)
+                        .background(Color.accentColor, in: RoundedRectangle(cornerRadius: 12))
+                        .foregroundStyle(.white)
+                }
+                .buttonStyle(.plain)
+
+                Button("Cancel", role: .cancel) {
+                    dismiss()
+                }
+                .font(.body)
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity)
+                .frame(height: 44)
+            }
+            .padding(.horizontal, 28)
+            .padding(.vertical, 16)
         }
     }
 }
