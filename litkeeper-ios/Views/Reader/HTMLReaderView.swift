@@ -113,6 +113,9 @@ struct HTMLReaderView: View {
     let story: Story
     let localStory: LocalStory?
     let appState: AppState
+    var targetChapterIndex: Int? = nil
+    var targetParagraphIndex: Int? = nil
+    var targetQuoteText: String? = nil
 
     @Environment(\.modelContext)  private var modelContext
     @Environment(\.dismiss)       private var dismiss
@@ -137,6 +140,15 @@ struct HTMLReaderView: View {
     @State private var serverScrollFraction: Double? = nil
     @State private var didFireCompletionHaptic = false
     @State private var readerItems: [ReaderItem] = []
+    @State private var quoteAlertVisible = false
+    @State private var quoteErrorAlertVisible = false
+    @State private var showSaveQuoteDialog = false
+    @State private var pendingQuoteChapter: Int? = nil
+    @State private var pendingQuoteParagraph: Int? = nil
+    @State private var pendingQuoteText: String = ""
+    @State private var targetScrollID: String? = nil
+    @State private var highlightFlatIndex: Int? = nil
+    @State private var pendingScrollToID: String? = nil
 
     private var theme: ReaderTheme {
         if colorThemeRaw.isEmpty {
@@ -213,22 +225,20 @@ struct HTMLReaderView: View {
         .background(theme.background)
     }
 
-    // MARK: - Reader items (flattened for true laziness)
-
-    private static let chunkSize = 15
+    // MARK: - Reader items (one item per paragraph for precise scroll targeting)
 
     private enum ReaderItem: Identifiable {
         case header
         case chapterDivider(chapterIndex: Int)
         case chapterTitle(chapterIndex: Int, title: String)
-        case paragraphChunk(startFlatIndex: Int, texts: [String])
+        case paragraph(flatIndex: Int, text: String)
 
         var id: String {
             switch self {
-            case .header:                            return "header"
-            case .chapterDivider(let ci):            return "div-\(ci)"
-            case .chapterTitle(let ci, _):           return "title-\(ci)"
-            case .paragraphChunk(let sfi, _):        return "chunk-\(sfi)"
+            case .header:                        return "header"
+            case .chapterDivider(let ci):        return "div-\(ci)"
+            case .chapterTitle(let ci, _):       return "title-\(ci)"
+            case .paragraph(let fi, _):          return "para-\(fi)"
             }
         }
     }
@@ -241,11 +251,8 @@ struct HTMLReaderView: View {
                 items.append(.chapterTitle(chapterIndex: ci, title: title))
             }
             let chapterStart = content.flatIndex(chapterIndex: ci, paragraphIndex: 0)
-            var idx = 0
-            while idx < chapter.paragraphs.count {
-                let slice = Array(chapter.paragraphs[idx..<min(idx + Self.chunkSize, chapter.paragraphs.count)])
-                items.append(.paragraphChunk(startFlatIndex: chapterStart + idx, texts: slice))
-                idx += Self.chunkSize
+            for (pi, text) in chapter.paragraphs.enumerated() {
+                items.append(.paragraph(flatIndex: chapterStart + pi, text: text))
             }
         }
         return items
@@ -256,6 +263,7 @@ struct HTMLReaderView: View {
     @ViewBuilder
     private func readerBody(content: StoryContent) -> some View {
         ScrollView(.vertical) {
+            ScrollViewReader { proxy in
             VStack(alignment: .leading, spacing: 0) {
                 ForEach(readerItems) { item in
                     switch item {
@@ -280,12 +288,17 @@ struct HTMLReaderView: View {
                                 .frame(height: 1.5)
                         }
                         .padding(.bottom, 24)
-                    case .paragraphChunk(_, let texts):
-                        VStack(alignment: .leading, spacing: 0) {
-                            ForEach(texts.indices, id: \.self) { i in
-                                paragraphView(text: texts[i])
+                    case .paragraph(let flatIndex, let text):
+                        paragraphView(text: text, isHighlighted: highlightFlatIndex == flatIndex)
+                            .onLongPressGesture(minimumDuration: 0.5) {
+                                if let (ci, pi) = content.chapterAndParagraph(for: flatIndex) {
+                                    pendingQuoteChapter = ci
+                                    pendingQuoteParagraph = pi
+                                    pendingQuoteText = text
+                                    showSaveQuoteDialog = true
+                                    HapticManager.shared.selectionChanged()
+                                }
                             }
-                        }
                     }
                 }
                 Color.clear.frame(height: 32)
@@ -293,6 +306,12 @@ struct HTMLReaderView: View {
             .padding(.horizontal, CGFloat(hPadding))
             .padding(.top, 80)
             .padding(.bottom, 20)
+            .onChange(of: pendingScrollToID) { _, id in
+                guard let id else { return }
+                proxy.scrollTo(id, anchor: .center)
+                pendingScrollToID = nil
+            }
+            } // ScrollViewReader
         }
         .scrollPosition($scrollPos)
         .background(theme.background)
@@ -341,6 +360,25 @@ struct HTMLReaderView: View {
         }
         .task(id: readerItems.isEmpty) {
             guard !readerItems.isEmpty else { return }
+
+            // When opened from a highlight, jump directly to the paragraph by ID.
+            // Wait for layout to complete (contentHeight > 0) so ScrollPosition can
+            // resolve the exact position before we reveal content.
+            if let targetID = targetScrollID {
+                // Wait for layout to complete before scrolling
+                var attempts = 0
+                while contentHeight == 0 && attempts < 20 {
+                    try? await Task.sleep(for: .milliseconds(50))
+                    attempts += 1
+                }
+                // Use ScrollViewReader proxy (proxy.scrollTo is reliable for centering)
+                pendingScrollToID = targetID
+                // Give the proxy one frame to apply before revealing content
+                try? await Task.sleep(for: .milliseconds(50))
+                withAnimation(.easeIn(duration: 0.15)) { hasRestoredPosition = true }
+                return
+            }
+
             let localFraction = localStory?.readingProgressScrollY ?? 0
             let serverFraction = serverScrollFraction ?? 0
             let saved = max(localFraction, serverFraction)
@@ -392,6 +430,21 @@ struct HTMLReaderView: View {
             )
             .presentationDetents([.large])
             .presentationDragIndicator(.visible)
+        }
+        .confirmationDialog("Save this passage as a quote?", isPresented: $showSaveQuoteDialog, titleVisibility: .visible) {
+            Button("Save Quote") {
+                if let ci = pendingQuoteChapter, let pi = pendingQuoteParagraph {
+                    let text = pendingQuoteText
+                    Task { await saveQuote(chapterIndex: ci, paragraphIndex: pi, rawHTML: text) }
+                }
+            }
+            Button("Cancel", role: .cancel) {}
+        }
+        .alert("Quote Saved", isPresented: $quoteAlertVisible) {
+            Button("OK", role: .cancel) {}
+        }
+        .alert("Could Not Save Quote", isPresented: $quoteErrorAlertVisible) {
+            Button("OK", role: .cancel) {}
         }
     }
 
@@ -451,11 +504,13 @@ struct HTMLReaderView: View {
     }
 
     @ViewBuilder
-    private func paragraphView(text: String) -> some View {
-        Text(text)
-            .font(resolvedFont)
-            .foregroundStyle(theme.text)
+    private func paragraphView(text: String, isHighlighted: Bool = false) -> some View {
+        Text(styledAttributedString(html: text, baseFont: resolvedFont, color: theme.text))
             .lineSpacing(CGFloat(fontSize * max(0, lineSpacing - 1.2) * 0.7))
+            .background(
+                isHighlighted ? Color.yellow.opacity(0.35) : Color.clear,
+                in: RoundedRectangle(cornerRadius: 3)
+            )
             .padding(.bottom, CGFloat(fontSize * lineSpacing * 0.6))
             .fixedSize(horizontal: false, vertical: true)
     }
@@ -510,6 +565,81 @@ struct HTMLReaderView: View {
         }
     }
 
+    // MARK: - Inline HTML rendering
+
+    private func styledAttributedString(html: String, baseFont: Font, color: Color) -> AttributedString {
+        guard html.contains("<") else {
+            var str = AttributedString(decodeHTMLEntities(html))
+            str.font = baseFont
+            str.foregroundColor = color
+            return str
+        }
+
+        var result = AttributedString()
+        var boldDepth = 0
+        var italicDepth = 0
+        var underlineDepth = 0
+        var cursor = html.startIndex
+
+        while cursor < html.endIndex {
+            if html[cursor] == "<" {
+                guard let tagEnd = html[cursor...].firstIndex(of: ">") else {
+                    appendRun(decodeHTMLEntities(String(html[cursor...])), bold: boldDepth > 0, italic: italicDepth > 0, underline: underlineDepth > 0, baseFont: baseFont, color: color, into: &result)
+                    break
+                }
+                let inner = String(html[html.index(after: cursor)..<tagEnd]).trimmingCharacters(in: .whitespaces)
+                cursor = html.index(after: tagEnd)
+
+                let closing = inner.hasPrefix("/")
+                var raw = closing ? String(inner.dropFirst()) : inner
+                raw = (raw.components(separatedBy: .whitespaces).first ?? raw)
+                raw = raw.hasSuffix("/") ? String(raw.dropLast()) : raw
+                let tag = raw.lowercased()
+
+                switch tag {
+                case "b", "strong": boldDepth      += closing ? -1 : 1
+                case "em", "i":     italicDepth    += closing ? -1 : 1
+                case "u":           underlineDepth += closing ? -1 : 1
+                case "br":          appendRun("\n", bold: false, italic: false, underline: false, baseFont: baseFont, color: color, into: &result)
+                default:            break
+                }
+            } else {
+                let textEnd = html[cursor...].firstIndex(of: "<") ?? html.endIndex
+                let text = decodeHTMLEntities(String(html[cursor..<textEnd]))
+                cursor = textEnd
+                if !text.isEmpty {
+                    appendRun(text, bold: boldDepth > 0, italic: italicDepth > 0, underline: underlineDepth > 0, baseFont: baseFont, color: color, into: &result)
+                }
+            }
+        }
+
+        return result
+    }
+
+    private func appendRun(_ text: String, bold: Bool, italic: Bool, underline: Bool, baseFont: Font, color: Color, into result: inout AttributedString) {
+        var str = AttributedString(text)
+        switch (bold, italic) {
+        case (true, true):  str.font = baseFont.bold().italic()
+        case (true, false): str.font = baseFont.bold()
+        case (false, true): str.font = baseFont.italic()
+        default:            str.font = baseFont
+        }
+        str.foregroundColor = color
+        if underline { str.underlineStyle = Text.LineStyle(pattern: .solid) }
+        result += str
+    }
+
+    private func decodeHTMLEntities(_ text: String) -> String {
+        text
+            .replacingOccurrences(of: "&amp;",  with: "&")
+            .replacingOccurrences(of: "&lt;",   with: "<")
+            .replacingOccurrences(of: "&gt;",   with: ">")
+            .replacingOccurrences(of: "&quot;", with: "\"")
+            .replacingOccurrences(of: "&#39;",  with: "'")
+            .replacingOccurrences(of: "&apos;", with: "'")
+            .replacingOccurrences(of: "&nbsp;", with: "\u{00A0}")
+    }
+
     // MARK: - Font resolution
 
     private var resolvedFont: Font {
@@ -524,6 +654,25 @@ struct HTMLReaderView: View {
     }
 
     // MARK: - Content loading
+
+    private func saveQuote(chapterIndex: Int, paragraphIndex: Int, rawHTML: String) async {
+        let text = rawHTML
+            .replacingOccurrences(of: "<[^>]+>", with: "", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard appState.isConfigured, !text.isEmpty else { return }
+        do {
+            try await appState.makeAPIClient().saveHighlight(
+                storyID: story.id,
+                chapterIndex: chapterIndex,
+                paragraphIndex: paragraphIndex,
+                quoteText: text
+            )
+            HapticManager.shared.notify(.success)
+            await MainActor.run { quoteAlertVisible = true }
+        } catch {
+            await MainActor.run { quoteErrorAlertVisible = true }
+        }
+    }
 
     private func loadContent() async {
         // Capture everything from appState/story/localStory BEFORE any await.
@@ -592,10 +741,45 @@ struct HTMLReaderView: View {
 
         // ── 3. Commit to main thread ──────────────────────────────────────
         let items = buildItems(content: decoded)
+
+        // If opened from a highlight, find the target paragraph.
+        // Primary: search by quote text — resilient to story updates shifting paragraph indices.
+        // Fallback: use stored chapter/paragraph indices.
+        var resolvedTargetScrollID: String? = nil
+        var resolvedHighlightFlatIndex: Int? = nil
+        if targetChapterIndex != nil || targetQuoteText != nil {
+            var found = false
+            if let quote = targetQuoteText {
+                let needle = quote.trimmingCharacters(in: .whitespacesAndNewlines)
+                outer: for (ci, chapter) in decoded.chapters.enumerated() {
+                    for (pi, paraHTML) in chapter.paragraphs.enumerated() {
+                        let stripped = paraHTML
+                            .replacingOccurrences(of: "<[^>]+>", with: "", options: .regularExpression)
+                            .trimmingCharacters(in: .whitespacesAndNewlines)
+                        if stripped.contains(needle) || needle.contains(stripped) {
+                            let flatIndex = decoded.flatIndex(chapterIndex: ci, paragraphIndex: pi)
+                            resolvedTargetScrollID = "para-\(flatIndex)"
+                            resolvedHighlightFlatIndex = flatIndex
+                            found = true
+                            break outer
+                        }
+                    }
+                }
+            }
+            // Fallback: stored indices
+            if !found, let ci = targetChapterIndex, let pi = targetParagraphIndex {
+                let flatIndex = decoded.flatIndex(chapterIndex: ci, paragraphIndex: pi)
+                resolvedTargetScrollID = "para-\(flatIndex)"
+                resolvedHighlightFlatIndex = flatIndex
+            }
+        }
+
         await MainActor.run {
             content = decoded
             readerItems = items
             serverScrollFraction = progressFraction
+            targetScrollID = resolvedTargetScrollID
+            highlightFlatIndex = resolvedHighlightFlatIndex
             isLoading = false
         }
     }

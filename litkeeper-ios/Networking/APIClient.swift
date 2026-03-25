@@ -162,6 +162,27 @@ actor APIClient {
         baseURL.appendingPathComponent("api/cover/\(filename)")
     }
 
+    // MARK: - Highlights
+
+    func fetchHighlights() async throws -> [Highlight] {
+        let data = try await get("/api/highlights")
+        return try decode(HighlightsResponse.self, from: data).highlights
+    }
+
+    func saveHighlight(storyID: Int, chapterIndex: Int, paragraphIndex: Int, quoteText: String) async throws {
+        let body: [String: Any] = [
+            "story_id": storyID,
+            "chapter_index": chapterIndex,
+            "paragraph_index": paragraphIndex,
+            "quote_text": quoteText
+        ]
+        _ = try await post("/api/highlights", body: body)
+    }
+
+    func deleteHighlight(id: Int) async throws {
+        _ = try await delete("/api/highlights/\(id)")
+    }
+
     // MARK: - Connection Test
 
     func testConnection() async throws {

@@ -40,18 +40,22 @@ struct RootView: View {
                 .tag(0)
 
             ReadingQueueView()
-                .tabItem { Label("Reading Queue", systemImage: "list.bullet") }
+                .tabItem { Label("Queue", systemImage: "list.bullet") }
                 .tag(1)
 
             QueueView()
                 .tabItem { Label("History", systemImage: "clock") }
                 .tag(2)
 
+            HighlightsView()
+                .tabItem { Label("Quotes", systemImage: "quote.bubble") }
+                .tag(3)
+
             NavigationStack {
                 SettingsView()
             }
             .tabItem { Label("Settings", systemImage: "gearshape") }
-            .tag(3)
+            .tag(4)
         }
         .onChange(of: selectedTab) {
             HapticManager.shared.selectionChanged()
