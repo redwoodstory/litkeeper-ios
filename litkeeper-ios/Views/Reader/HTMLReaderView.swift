@@ -149,6 +149,10 @@ struct HTMLReaderView: View {
     @State private var targetScrollID: String? = nil
     @State private var highlightFlatIndex: Int? = nil
     @State private var pendingScrollToID: String? = nil
+    @State private var pendingResumeScrollID: String? = nil
+    @State private var attrCache: [Int: AttributedString] = [:]
+    @State private var visibleParagraphIndices: Set<Int> = []
+    @State private var totalParagraphs: Int = 0
 
     private var theme: ReaderTheme {
         if colorThemeRaw.isEmpty {
@@ -176,6 +180,12 @@ struct HTMLReaderView: View {
             }
         }
         .task { await loadContent() }
+        .onChange(of: readerItems.count) { old, new in
+            if old == 0 && new > 0 { buildAttrCache() }
+        }
+        .onChange(of: fontSize)       { _, _ in buildAttrCache() }
+        .onChange(of: fontKey)        { _, _ in buildAttrCache() }
+        .onChange(of: colorThemeRaw)  { _, _ in buildAttrCache() }
         .onDisappear {
             guard scrollProgress > 0 else {
                 print("[HTML] onDisappear: scrollProgress=0, skipping server save")
@@ -264,7 +274,7 @@ struct HTMLReaderView: View {
     private func readerBody(content: StoryContent) -> some View {
         ScrollView(.vertical) {
             ScrollViewReader { proxy in
-            VStack(alignment: .leading, spacing: 0) {
+            LazyVStack(alignment: .leading, spacing: 0) {
                 ForEach(readerItems) { item in
                     switch item {
                     case .header:
@@ -289,16 +299,26 @@ struct HTMLReaderView: View {
                         }
                         .padding(.bottom, 24)
                     case .paragraph(let flatIndex, let text):
-                        paragraphView(text: text, isHighlighted: highlightFlatIndex == flatIndex)
-                            .onLongPressGesture(minimumDuration: 0.5) {
-                                if let (ci, pi) = content.chapterAndParagraph(for: flatIndex) {
-                                    pendingQuoteChapter = ci
-                                    pendingQuoteParagraph = pi
-                                    pendingQuoteText = text
-                                    showSaveQuoteDialog = true
-                                    HapticManager.shared.selectionChanged()
-                                }
+                        ParagraphView(
+                            text: text,
+                            isHighlighted: highlightFlatIndex == flatIndex,
+                            cachedAttr: attrCache[flatIndex],
+                            baseFont: resolvedFont,
+                            textColor: theme.text,
+                            fontSize: fontSize,
+                            lineSpacing: lineSpacing
+                        )
+                        .onAppear    { visibleParagraphIndices.insert(flatIndex) }
+                        .onDisappear { visibleParagraphIndices.remove(flatIndex) }
+                        .onLongPressGesture(minimumDuration: 0.5) {
+                            if let (ci, pi) = content.chapterAndParagraph(for: flatIndex) {
+                                pendingQuoteChapter = ci
+                                pendingQuoteParagraph = pi
+                                pendingQuoteText = text
+                                showSaveQuoteDialog = true
+                                HapticManager.shared.selectionChanged()
                             }
+                        }
                     }
                 }
                 Color.clear.frame(height: 32)
@@ -310,6 +330,11 @@ struct HTMLReaderView: View {
                 guard let id else { return }
                 proxy.scrollTo(id, anchor: .center)
                 pendingScrollToID = nil
+            }
+            .onChange(of: pendingResumeScrollID) { _, id in
+                guard let id else { return }
+                proxy.scrollTo(id, anchor: .top)
+                pendingResumeScrollID = nil
             }
             } // ScrollViewReader
         }
@@ -324,13 +349,10 @@ struct HTMLReaderView: View {
         .onScrollGeometryChange(for: CGFloat.self) { $0.contentSize.height } action: { _, h in
             contentHeight = h
         }
-        // Track scroll fraction for footer and progress saving
-        .onScrollGeometryChange(for: Double.self) { geo in
-            let offset = max(geo.contentOffset.y - geo.contentInsets.top, 0)
-            let maxScroll = max(geo.contentSize.height - geo.containerSize.height, 1)
-            let raw = min(offset / maxScroll, 1)
-            return (raw * 200).rounded() / 200
-        } action: { _, fraction in
+        // Track scroll progress from visible paragraph index — stable under lazy layout.
+        .onChange(of: visibleParagraphIndices) { _, indices in
+            guard let minIndex = indices.min(), totalParagraphs > 0 else { return }
+            let fraction = min(Double(minIndex) / Double(max(totalParagraphs - 1, 1)), 1.0)
             scrollProgress = fraction
             if fraction >= 0.99 && !didFireCompletionHaptic {
                 didFireCompletionHaptic = true
@@ -344,6 +366,11 @@ struct HTMLReaderView: View {
             if let localStory {
                 localStory.readingProgressScrollY = fraction
                 localStory.readingProgressPercentage = fraction * 100
+                if let minIndex = visibleParagraphIndices.min() {
+                    let id = "para-\(minIndex)"
+                    localStory.readingProgressParagraphID = id
+                    print("[HTML] saving paragraphID=\(id)")
+                }
             }
             if fraction > lastPushedFraction + 0.05 {
                 lastPushedFraction = fraction
@@ -361,24 +388,29 @@ struct HTMLReaderView: View {
         .task(id: readerItems.isEmpty) {
             guard !readerItems.isEmpty else { return }
 
-            // When opened from a highlight, jump directly to the paragraph by ID.
-            // Wait for layout to complete (contentHeight > 0) so ScrollPosition can
-            // resolve the exact position before we reveal content.
+            // Priority 1: opened from a highlight — jump to that exact paragraph.
             if let targetID = targetScrollID {
-                // Wait for layout to complete before scrolling
                 var attempts = 0
                 while contentHeight == 0 && attempts < 20 {
                     try? await Task.sleep(for: .milliseconds(50))
                     attempts += 1
                 }
-                // Use ScrollViewReader proxy (proxy.scrollTo is reliable for centering)
                 pendingScrollToID = targetID
-                // Give the proxy one frame to apply before revealing content
                 try? await Task.sleep(for: .milliseconds(50))
                 withAnimation(.easeIn(duration: 0.15)) { hasRestoredPosition = true }
                 return
             }
 
+            // Priority 2: saved paragraph ID — precise, layout-independent.
+            if let paragraphID = localStory?.readingProgressParagraphID {
+                print("[HTML] restore: paragraph-based → \(paragraphID)")
+                pendingResumeScrollID = paragraphID
+                try? await Task.sleep(for: .milliseconds(50))
+                withAnimation(.easeIn(duration: 0.15)) { hasRestoredPosition = true }
+                return
+            }
+
+            // Priority 3: fraction-based fallback (for saves predating paragraph tracking).
             let localFraction = localStory?.readingProgressScrollY ?? 0
             let serverFraction = serverScrollFraction ?? 0
             let saved = max(localFraction, serverFraction)
@@ -387,9 +419,8 @@ struct HTMLReaderView: View {
                 withAnimation(.easeIn(duration: 0.15)) { hasRestoredPosition = true }
                 return
             }
-            print("[HTML] restore: local=\(Int(localFraction * 100))% server=\(Int(serverFraction * 100))% → using \(Int(saved * 100))%")
+            print("[HTML] restore: fraction-based \(Int(localFraction * 100))%/\(Int(serverFraction * 100))% → using \(Int(saved * 100))%")
             scrollProgress = saved
-            // Wait for the VStack to lay out and contentHeight to be populated
             try? await Task.sleep(for: .milliseconds(100))
             guard contentHeight > 0 else {
                 hasRestoredPosition = true
@@ -503,18 +534,6 @@ struct HTMLReaderView: View {
         .padding(.bottom, 28)
     }
 
-    @ViewBuilder
-    private func paragraphView(text: String, isHighlighted: Bool = false) -> some View {
-        Text(styledAttributedString(html: text, baseFont: resolvedFont, color: theme.text))
-            .lineSpacing(CGFloat(fontSize * max(0, lineSpacing - 1.2) * 0.7))
-            .background(
-                isHighlighted ? Color.yellow.opacity(0.35) : Color.clear,
-                in: RoundedRectangle(cornerRadius: 3)
-            )
-            .padding(.bottom, CGFloat(fontSize * lineSpacing * 0.6))
-            .fixedSize(horizontal: false, vertical: true)
-    }
-
     // MARK: - Controls overlay (header + footer rendered separately for directional transitions)
 
     private var headerBar: some View {
@@ -565,81 +584,6 @@ struct HTMLReaderView: View {
         }
     }
 
-    // MARK: - Inline HTML rendering
-
-    private func styledAttributedString(html: String, baseFont: Font, color: Color) -> AttributedString {
-        guard html.contains("<") else {
-            var str = AttributedString(decodeHTMLEntities(html))
-            str.font = baseFont
-            str.foregroundColor = color
-            return str
-        }
-
-        var result = AttributedString()
-        var boldDepth = 0
-        var italicDepth = 0
-        var underlineDepth = 0
-        var cursor = html.startIndex
-
-        while cursor < html.endIndex {
-            if html[cursor] == "<" {
-                guard let tagEnd = html[cursor...].firstIndex(of: ">") else {
-                    appendRun(decodeHTMLEntities(String(html[cursor...])), bold: boldDepth > 0, italic: italicDepth > 0, underline: underlineDepth > 0, baseFont: baseFont, color: color, into: &result)
-                    break
-                }
-                let inner = String(html[html.index(after: cursor)..<tagEnd]).trimmingCharacters(in: .whitespaces)
-                cursor = html.index(after: tagEnd)
-
-                let closing = inner.hasPrefix("/")
-                var raw = closing ? String(inner.dropFirst()) : inner
-                raw = (raw.components(separatedBy: .whitespaces).first ?? raw)
-                raw = raw.hasSuffix("/") ? String(raw.dropLast()) : raw
-                let tag = raw.lowercased()
-
-                switch tag {
-                case "b", "strong": boldDepth      += closing ? -1 : 1
-                case "em", "i":     italicDepth    += closing ? -1 : 1
-                case "u":           underlineDepth += closing ? -1 : 1
-                case "br":          appendRun("\n", bold: false, italic: false, underline: false, baseFont: baseFont, color: color, into: &result)
-                default:            break
-                }
-            } else {
-                let textEnd = html[cursor...].firstIndex(of: "<") ?? html.endIndex
-                let text = decodeHTMLEntities(String(html[cursor..<textEnd]))
-                cursor = textEnd
-                if !text.isEmpty {
-                    appendRun(text, bold: boldDepth > 0, italic: italicDepth > 0, underline: underlineDepth > 0, baseFont: baseFont, color: color, into: &result)
-                }
-            }
-        }
-
-        return result
-    }
-
-    private func appendRun(_ text: String, bold: Bool, italic: Bool, underline: Bool, baseFont: Font, color: Color, into result: inout AttributedString) {
-        var str = AttributedString(text)
-        switch (bold, italic) {
-        case (true, true):  str.font = baseFont.bold().italic()
-        case (true, false): str.font = baseFont.bold()
-        case (false, true): str.font = baseFont.italic()
-        default:            str.font = baseFont
-        }
-        str.foregroundColor = color
-        if underline { str.underlineStyle = Text.LineStyle(pattern: .solid) }
-        result += str
-    }
-
-    private func decodeHTMLEntities(_ text: String) -> String {
-        text
-            .replacingOccurrences(of: "&amp;",  with: "&")
-            .replacingOccurrences(of: "&lt;",   with: "<")
-            .replacingOccurrences(of: "&gt;",   with: ">")
-            .replacingOccurrences(of: "&quot;", with: "\"")
-            .replacingOccurrences(of: "&#39;",  with: "'")
-            .replacingOccurrences(of: "&apos;", with: "'")
-            .replacingOccurrences(of: "&nbsp;", with: "\u{00A0}")
-    }
-
     // MARK: - Font resolution
 
     private var resolvedFont: Font {
@@ -650,6 +594,23 @@ struct HTMLReaderView: View {
         case "baskerville": return .custom("Baskerville", size: size)
         case "didot":       return .custom("Didot",      size: size)
         default:            return .system(size: size)
+        }
+    }
+
+    // MARK: - AttributedString cache
+
+    private func buildAttrCache() {
+        let font = resolvedFont
+        let color = theme.text
+        let items = readerItems
+        Task {
+            var built: [Int: AttributedString] = [:]
+            for item in items {
+                if case .paragraph(let fi, let text) = item {
+                    built[fi] = styledAttributedString(html: text, baseFont: font, color: color)
+                }
+            }
+            attrCache = built
         }
     }
 
@@ -681,8 +642,9 @@ struct HTMLReaderView: View {
         // await is unsafe and can silently produce stale or nil results.
         let storyID       = story.id
         let filenameBase  = story.filenameBase
-        let localHTMLPath = localStory?.htmlLocalPath
-        let localScrollY  = localStory?.readingProgressScrollY
+        let localHTMLPath    = localStory?.htmlLocalPath
+        let localScrollY     = localStory?.readingProgressScrollY
+        let localParagraphID = localStory?.readingProgressParagraphID
         let client: APIClient? = appState.isConfigured ? appState.makeAPIClient() : nil
         let serverBase    = appState.serverURL.hasSuffix("/")
             ? String(appState.serverURL.dropLast())
@@ -777,12 +739,111 @@ struct HTMLReaderView: View {
         await MainActor.run {
             content = decoded
             readerItems = items
+            totalParagraphs = decoded.totalParagraphs
             serverScrollFraction = progressFraction
             targetScrollID = resolvedTargetScrollID
             highlightFlatIndex = resolvedHighlightFlatIndex
             isLoading = false
         }
     }
+}
+
+// MARK: - Paragraph view
+
+private struct ParagraphView: View {
+    let text: String
+    let isHighlighted: Bool
+    let cachedAttr: AttributedString?
+    let baseFont: Font
+    let textColor: Color
+    let fontSize: Double
+    let lineSpacing: Double
+
+    var body: some View {
+        Text(cachedAttr ?? styledAttributedString(html: text, baseFont: baseFont, color: textColor))
+            .lineSpacing(CGFloat(fontSize * max(0, lineSpacing - 1.2) * 0.7))
+            .background(
+                isHighlighted ? Color.yellow.opacity(0.35) : Color.clear,
+                in: RoundedRectangle(cornerRadius: 3)
+            )
+            .padding(.bottom, CGFloat(fontSize * lineSpacing * 0.6))
+            .fixedSize(horizontal: false, vertical: true)
+    }
+}
+
+// MARK: - Inline HTML rendering (file-scope so ParagraphView and HTMLReaderView can both use it)
+
+private func styledAttributedString(html: String, baseFont: Font, color: Color) -> AttributedString {
+    guard html.contains("<") else {
+        var str = AttributedString(decodeHTMLEntities(html))
+        str.font = baseFont
+        str.foregroundColor = color
+        return str
+    }
+
+    var result = AttributedString()
+    var boldDepth = 0
+    var italicDepth = 0
+    var underlineDepth = 0
+    var cursor = html.startIndex
+
+    while cursor < html.endIndex {
+        if html[cursor] == "<" {
+            guard let tagEnd = html[cursor...].firstIndex(of: ">") else {
+                appendRun(decodeHTMLEntities(String(html[cursor...])), bold: boldDepth > 0, italic: italicDepth > 0, underline: underlineDepth > 0, baseFont: baseFont, color: color, into: &result)
+                break
+            }
+            let inner = String(html[html.index(after: cursor)..<tagEnd]).trimmingCharacters(in: .whitespaces)
+            cursor = html.index(after: tagEnd)
+
+            let closing = inner.hasPrefix("/")
+            var raw = closing ? String(inner.dropFirst()) : inner
+            raw = (raw.components(separatedBy: .whitespaces).first ?? raw)
+            raw = raw.hasSuffix("/") ? String(raw.dropLast()) : raw
+            let tag = raw.lowercased()
+
+            switch tag {
+            case "b", "strong": boldDepth      += closing ? -1 : 1
+            case "em", "i":     italicDepth    += closing ? -1 : 1
+            case "u":           underlineDepth += closing ? -1 : 1
+            case "br":          appendRun("\n", bold: false, italic: false, underline: false, baseFont: baseFont, color: color, into: &result)
+            default:            break
+            }
+        } else {
+            let textEnd = html[cursor...].firstIndex(of: "<") ?? html.endIndex
+            let text = decodeHTMLEntities(String(html[cursor..<textEnd]))
+            cursor = textEnd
+            if !text.isEmpty {
+                appendRun(text, bold: boldDepth > 0, italic: italicDepth > 0, underline: underlineDepth > 0, baseFont: baseFont, color: color, into: &result)
+            }
+        }
+    }
+
+    return result
+}
+
+private func appendRun(_ text: String, bold: Bool, italic: Bool, underline: Bool, baseFont: Font, color: Color, into result: inout AttributedString) {
+    var str = AttributedString(text)
+    switch (bold, italic) {
+    case (true, true):  str.font = baseFont.bold().italic()
+    case (true, false): str.font = baseFont.bold()
+    case (false, true): str.font = baseFont.italic()
+    default:            str.font = baseFont
+    }
+    str.foregroundColor = color
+    if underline { str.underlineStyle = Text.LineStyle(pattern: .solid) }
+    result += str
+}
+
+private func decodeHTMLEntities(_ text: String) -> String {
+    text
+        .replacingOccurrences(of: "&amp;",  with: "&")
+        .replacingOccurrences(of: "&lt;",   with: "<")
+        .replacingOccurrences(of: "&gt;",   with: ">")
+        .replacingOccurrences(of: "&quot;", with: "\"")
+        .replacingOccurrences(of: "&#39;",  with: "'")
+        .replacingOccurrences(of: "&apos;", with: "'")
+        .replacingOccurrences(of: "&nbsp;", with: "\u{00A0}")
 }
 
 // MARK: - Settings sheet

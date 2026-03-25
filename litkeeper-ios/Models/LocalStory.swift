@@ -18,6 +18,7 @@ final class LocalStory {
     var readingProgressLocator: String?
     var readingProgressPercentage: Double?
     var readingProgressScrollY: Double?
+    var readingProgressParagraphID: String?
 
     init(
         storyID: Int,
