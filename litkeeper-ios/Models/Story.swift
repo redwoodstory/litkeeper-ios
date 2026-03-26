@@ -17,6 +17,8 @@ struct Story: Identifiable, Codable, Hashable {
     var size: Int?
     var rating: Int?
     var inQueue: Bool
+    var queuedAt: String?
+    var lastOpenedAt: String?
     var description: String?
     var dateAdded: String?
     var updatedAt: String?
@@ -30,6 +32,8 @@ struct Story: Identifiable, Codable, Hashable {
         case chapterCount = "chapter_count"
         case pageCount = "page_count"
         case inQueue = "in_queue"
+        case queuedAt = "queued_at"
+        case lastOpenedAt = "last_opened_at"
         case dateAdded = "date_added"
         case updatedAt = "updated_at"
     }

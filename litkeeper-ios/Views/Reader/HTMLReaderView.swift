@@ -180,7 +180,31 @@ struct HTMLReaderView: View {
                 colorThemeRaw = (systemColorScheme == .dark ? ReaderTheme.darkNavy : .beige).rawValue
             }
         }
-        .task { await loadContent() }
+        .task { 
+            await loadContent()
+            // Track story opened
+            if let localStory {
+                localStory.lastOpenedAt = Date()
+                try? modelContext.save()
+            }
+            // Queue pending operation for server sync
+            let storyID = story.id
+            let timestamp = Date()
+            let existing = (try? modelContext.fetch(
+                FetchDescriptor<PendingOperation>(predicate: #Predicate { $0.storyID == storyID && $0.operationType == "last_opened" })
+            ))?.first
+            let op: PendingOperation
+            if let existing {
+                op = existing
+            } else {
+                op = PendingOperation(storyID: storyID, operationType: "last_opened")
+                modelContext.insert(op)
+            }
+            op.lastOpenedAt = timestamp
+            try? modelContext.save()
+            
+            Task { await syncService.flushPendingOperations(appState: appState, modelContext: modelContext) }
+        }
         .onChange(of: readerItems.count) { old, new in
             if old == 0 && new > 0 { buildAttrCache() }
         }

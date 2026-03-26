@@ -1,7 +1,11 @@
 import SwiftUI
+import SwiftData
 
 struct QueueView: View {
     @Environment(AppState.self) private var appState
+    @Environment(\.modelContext) private var modelContext
+
+    
     @State private var viewModel = QueueViewModel()
     @State private var knownCompletedIDs: Set<Int> = []
     @State private var knownFailedIDs: Set<Int> = []
@@ -25,6 +29,8 @@ struct QueueView: View {
                     )
                 } else {
                     List {
+                        
+                        // Download Queue Stats
                         if let stats = viewModel.stats {
                             Section {
                                 HStack(spacing: 0) {
@@ -37,11 +43,16 @@ struct QueueView: View {
                                     statCell(label: "Failed", value: stats.failed, color: .red)
                                 }
                                 .frame(maxWidth: .infinity)
+                            } header: {
+                                Text("Download History")
                             }
                         }
 
-                        Section {
-                            ForEach(viewModel.items) { item in QueueItemRow(item: item) }
+                        // Download Queue Items
+                        if !viewModel.items.isEmpty {
+                            Section {
+                                ForEach(viewModel.items) { item in QueueItemRow(item: item) }
+                            }
                         }
                     }
                     .refreshable {

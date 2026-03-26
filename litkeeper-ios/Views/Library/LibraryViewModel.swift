@@ -19,6 +19,7 @@ final class LibraryViewModel {
 
     enum SortOption: String, CaseIterable, Identifiable {
         case dateAdded = "Date Added"
+        case lastOpened = "Date Last Opened"
         case title = "Title"
         case author = "Author"
         case wordCount = "Length"
@@ -52,6 +53,14 @@ final class LibraryViewModel {
                 return ascending
                     ? (a.dateAdded ?? "") < (b.dateAdded ?? "")
                     : (a.dateAdded ?? "") > (b.dateAdded ?? "")
+            case .lastOpened:
+                // Stories never opened (nil) should appear last when descending (most recent first)
+                let aDate = a.lastOpenedAt ?? ""
+                let bDate = b.lastOpenedAt ?? ""
+                if aDate.isEmpty && bDate.isEmpty { return false }
+                if aDate.isEmpty { return ascending }
+                if bDate.isEmpty { return !ascending }
+                return ascending ? aDate < bDate : aDate > bDate
             case .title:
                 return ascending ? a.title < b.title : a.title > b.title
             case .author:

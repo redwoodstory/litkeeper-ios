@@ -423,8 +423,10 @@ struct StoryDetailView: View {
     // MARK: - Helpers
 
     private func enqueueQueueOp(inQueue: Bool) {
+        let timestamp = inQueue ? Date() : nil
         if let local = localStory {
             local.inQueue = inQueue
+            local.queuedAt = timestamp
         } else {
             // Story not yet downloaded — create a metadata-only record so the state
             // survives onAppear re-fires and appears correctly in the queue view.
@@ -437,9 +439,13 @@ struct StoryDetailView: View {
             )
             record.updateMetadata(from: story)
             record.inQueue = inQueue
+            record.queuedAt = timestamp
             modelContext.insert(record)
         }
-        upsertPendingOp(type: "queue") { $0.inQueue = inQueue }
+        upsertPendingOp(type: "queue") { 
+            $0.inQueue = inQueue
+            $0.queuedAt = timestamp
+        }
         Task { await syncService.flushPendingOperations(appState: appState, modelContext: modelContext) }
     }
 

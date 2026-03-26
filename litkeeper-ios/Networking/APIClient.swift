@@ -87,12 +87,22 @@ actor APIClient {
         _ = try await post("/api/story/\(storyID)/rating", body: ["rating": rating])
     }
 
-    func updateQueue(storyID: Int, inQueue: Bool) async throws {
-        _ = try await post("/api/story/\(storyID)/queue", body: ["in_queue": inQueue])
+    func updateQueue(storyID: Int, inQueue: Bool, queuedAt: Date? = nil) async throws {
+        var body: [String: Any] = ["in_queue": inQueue]
+        if let queuedAt = queuedAt {
+            let isoFormatter = ISO8601DateFormatter()
+            body["queued_at"] = isoFormatter.string(from: queuedAt)
+        }
+        _ = try await post("/api/story/\(storyID)/queue", body: body)
     }
 
     func deleteStory(storyID: Int) async throws {
         _ = try await delete("/api/story/delete/\(storyID)")
+    }
+    
+    func updateLastOpened(storyID: Int, timestamp: Date) async throws {
+        let isoFormatter = ISO8601DateFormatter()
+        _ = try await post("/api/story/\(storyID)/last_opened", body: ["last_opened_at": isoFormatter.string(from: timestamp)])
     }
 
     func updateMetadata(storyID: Int, title: String, author: String, category: String?, description: String?, tags: [String]) async throws -> Bool {

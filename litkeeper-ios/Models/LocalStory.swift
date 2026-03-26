@@ -12,6 +12,8 @@ final class LocalStory {
     var htmlLocalPath: String?    // relative to Documents/LitKeeper/stories/html/
     var coverLocalPath: String?   // relative to Documents/LitKeeper/stories/covers/
     var inQueue: Bool = false
+    var queuedAt: Date?
+    var lastOpenedAt: Date?
     var downloadedAt: Date
     var serverUpdatedAt: Date?
     var lastReadAt: Date?
@@ -67,11 +69,21 @@ final class LocalStory {
         size = story.size
         rating = story.rating
         storyDescription = story.description
+        
+        // Parse datetime strings to Date objects
+        let isoFormatter = ISO8601DateFormatter()
+        if let queuedAtStr = story.queuedAt {
+            queuedAt = isoFormatter.date(from: queuedAtStr)
+        }
+        if let lastOpenedAtStr = story.lastOpenedAt {
+            lastOpenedAt = isoFormatter.date(from: lastOpenedAtStr)
+        }
     }
 
     /// Constructs a Story value with all available cached metadata.
     var asStory: Story {
-        Story(
+        let isoFormatter = ISO8601DateFormatter()
+        return Story(
             id: storyID,
             title: title,
             author: author,
@@ -88,6 +100,8 @@ final class LocalStory {
             size: size,
             rating: rating,
             inQueue: inQueue,
+            queuedAt: queuedAt.map { isoFormatter.string(from: $0) },
+            lastOpenedAt: lastOpenedAt.map { isoFormatter.string(from: $0) },
             description: storyDescription,
             dateAdded: nil,
             updatedAt: nil

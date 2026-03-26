@@ -7,12 +7,14 @@ import SwiftData
 @Model
 final class PendingOperation {
     var storyID: Int
-    /// One of: "queue", "rating", "progress"
+    /// One of: "queue", "rating", "progress", "last_opened"
     var operationType: String
     var inQueue: Bool?
+    var queuedAt: Date?
     var rating: Int?
     var progressFraction: Double?
     var progressParagraphID: String?
+    var lastOpenedAt: Date?
     var createdAt: Date
 
     init(storyID: Int, operationType: String) {

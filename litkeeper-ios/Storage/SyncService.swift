@@ -214,6 +214,12 @@ final class SyncService {
                 // Only update queue flag if there's no pending local change waiting to sync
                 if !pendingQueueIDs.contains(story.id) {
                     local.inQueue = story.inQueue ?? false
+                    // Sync queuedAt from server if not pending
+                    if let queuedAtStr = story.queuedAt {
+                        local.queuedAt = Self.isoFormatter.date(from: queuedAtStr)
+                    } else {
+                        local.queuedAt = nil
+                    }
                 }
                 // Preserve pending rating before updateMetadata overwrites it
                 let savedRating = pendingRatingIDs.contains(story.id) ? local.rating : nil
@@ -343,7 +349,7 @@ final class SyncService {
             do {
                 switch op.operationType {
                 case "queue":
-                    try await client.updateQueue(storyID: op.storyID, inQueue: op.inQueue ?? false)
+                    try await client.updateQueue(storyID: op.storyID, inQueue: op.inQueue ?? false, queuedAt: op.queuedAt)
                 case "rating":
                     try await client.updateRating(storyID: op.storyID, rating: op.rating ?? 0)
                 case "progress":
@@ -356,6 +362,10 @@ final class SyncService {
                             lastReadAt: nil
                         )
                         try await client.saveProgress(storyID: op.storyID, progress: progress)
+                    }
+                case "last_opened":
+                    if let timestamp = op.lastOpenedAt {
+                        try await client.updateLastOpened(storyID: op.storyID, timestamp: timestamp)
                     }
                 default:
                     break
