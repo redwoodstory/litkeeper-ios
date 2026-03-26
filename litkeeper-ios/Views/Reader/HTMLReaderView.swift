@@ -376,11 +376,13 @@ struct HTMLReaderView: View {
                 lastPushedFraction = fraction
                 print("[HTML] server sync (idle): \(Int(fraction * 100))%")
                 let storyID = story.id
+                let paragraphID = visibleParagraphIndices.min().map { "para-\($0)" }
                 let progress = ReadingProgress(
                     currentChapter: nil, cfi: nil,
                     percentage: fraction,
                     isCompleted: fraction >= 0.99,
-                    lastReadAt: nil
+                    lastReadAt: nil,
+                    paragraphID: paragraphID
                 )
                 Task { try? await appState.makeAPIClient().saveProgress(storyID: storyID, progress: progress) }
             }

@@ -228,10 +228,27 @@ final class SyncService {
         let progressMap = await client.fetchAllProgress(storyIDs: ids)
         guard !progressMap.isEmpty else { return }
 
+        let isoFormatter = ISO8601DateFormatter()
         for story in localStories {
-            if let p = progressMap[story.storyID], let pct = p.percentage {
-                story.readingProgressScrollY = pct
-                story.readingProgressPercentage = pct * 100
+            guard let p = progressMap[story.storyID] else { continue }
+
+            // Determine if server progress is newer than what's stored locally
+            let serverDate = p.lastReadAt.flatMap { isoFormatter.date(from: $0) }
+            let localDate = story.lastReadAt
+            let serverIsNewer = serverDate != nil && (localDate == nil || serverDate! > localDate!)
+
+            if let pct = p.percentage {
+                // Only overwrite local fraction if server is newer (avoids regressing progress)
+                if serverIsNewer || story.readingProgressScrollY == nil {
+                    story.readingProgressScrollY = pct
+                    story.readingProgressPercentage = pct * 100
+                }
+            }
+
+            // Restore precise paragraph position when server has newer data
+            if serverIsNewer, let pid = p.paragraphID {
+                story.readingProgressParagraphID = pid
+                story.lastReadAt = serverDate
             }
         }
         try? modelContext.save()
