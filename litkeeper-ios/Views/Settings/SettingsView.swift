@@ -9,6 +9,10 @@ struct SettingsView: View {
     @State private var showClearConfirm = false
     @State private var storageUsed: String = ""
 
+    enum ConnectionStatus { case unknown, checking, reachable, unreachable }
+
+    @State private var connectionStatus: ConnectionStatus = .unknown
+
     var body: some View {
         @Bindable var appStateBindable = appState
         NavigationStack {
@@ -18,8 +22,7 @@ struct SettingsView: View {
                         ServerSettingsView()
                     }
                     LabeledContent("Status") {
-                        Text(appState.isConfigured ? "Connected" : "Not configured")
-                            .foregroundStyle(appState.isConfigured ? .green : .secondary)
+                        statusLabel
                     }
                 }
 
@@ -47,7 +50,13 @@ struct SettingsView: View {
                 }
             }
             .navigationTitle("Settings")
-            .onAppear { refreshStorageUsed() }
+            .onAppear {
+                refreshStorageUsed()
+                checkConnection()
+            }
+            .onChange(of: appState.isConfigured) { _, _ in
+                checkConnection()
+            }
             .confirmationDialog(
                 "Clear all downloaded stories?",
                 isPresented: $showClearConfirm,
@@ -58,6 +67,48 @@ struct SettingsView: View {
                 }
             } message: {
                 Text("Story files will be removed from this device. Your library on the server is unaffected.")
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var statusLabel: some View {
+        switch connectionStatus {
+        case .unknown, .checking:
+            if appState.isConfigured {
+                HStack(spacing: 6) {
+                    ProgressView().scaleEffect(0.7)
+                    Text("Checking…").foregroundStyle(.secondary)
+                }
+            } else {
+                Text("Not configured").foregroundStyle(.secondary)
+            }
+        case .reachable:
+            HStack(spacing: 6) {
+                Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
+                Text("Reachable").foregroundStyle(.green)
+            }
+        case .unreachable:
+            HStack(spacing: 6) {
+                Image(systemName: "xmark.circle.fill").foregroundStyle(.red)
+                Text("Unreachable").foregroundStyle(.red)
+            }
+        }
+    }
+
+    private func checkConnection() {
+        guard appState.isConfigured else {
+            connectionStatus = .unknown
+            return
+        }
+        connectionStatus = .checking
+        let client = appState.makeAPIClient()
+        Task {
+            do {
+                try await client.testConnection()
+                connectionStatus = .reachable
+            } catch {
+                connectionStatus = .unreachable
             }
         }
     }

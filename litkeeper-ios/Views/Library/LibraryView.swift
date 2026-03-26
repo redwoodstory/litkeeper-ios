@@ -17,6 +17,14 @@ struct LibraryView: View {
         GridItem(.adaptive(minimum: 100, maximum: 140), spacing: 12)
     ]
 
+    // Derived directly from @Query so they update immediately, even while a sheet is open.
+    private var localQueuedIDs: Set<Int> {
+        Set(localStories.filter { $0.inQueue }.map { $0.storyID })
+    }
+    private var localFavoritedIDs: Set<Int> {
+        Set(localStories.filter { ($0.rating ?? 0) >= 5 }.map { $0.storyID })
+    }
+
     var body: some View {
         NavigationStack {
             Group {
@@ -46,6 +54,8 @@ struct LibraryView: View {
                                     StoryCard(
                                         story: story,
                                         isDownloaded: viewModel.isDownloaded(story),
+                                        isInQueue: story.inQueue || localQueuedIDs.contains(story.id),
+                                        isFavorited: story.rating == 5 || localFavoritedIDs.contains(story.id),
                                         coverURL: coverURL(for: story),
                                         token: appState.apiToken,
                                         pangolinTokenId: appState.pangolinTokenId,
@@ -68,8 +78,13 @@ struct LibraryView: View {
                     .refreshable {
                         await viewModel.refresh(appState: appState)
                         HapticManager.shared.notify(.success)
+                        syncService.syncQueueStatus(for: viewModel.stories, modelContext: modelContext)
+                        cardsAppeared = false
                         Task { await syncService.syncCovers(for: viewModel.stories, serverURL: appState.serverURL, token: appState.apiToken, pangolinTokenId: appState.pangolinTokenId, pangolinToken: appState.pangolinToken) }
                         Task { await syncService.syncContent(for: viewModel.stories, serverURL: appState.serverURL, token: appState.apiToken, pangolinTokenId: appState.pangolinTokenId, pangolinToken: appState.pangolinToken, modelContext: modelContext, localStories: localStories) }
+                        Task { await syncService.syncHighlights(appState: appState, modelContext: modelContext) }
+                        try? await Task.sleep(for: .milliseconds(50))
+                        cardsAppeared = true
                     }
                     .onAppear {
                         guard !cardsAppeared else { return }
@@ -97,7 +112,7 @@ struct LibraryView: View {
                 AddStoryView()
                     .environment(appState)
                     .onDisappear {
-                        Task { await viewModel.refresh(appState: appState) }
+                        Task { await viewModel.refresh(appState: appState, silent: true) }
                     }
             }
             .sheet(isPresented: $showFilterSort) {
@@ -114,7 +129,7 @@ struct LibraryView: View {
                 StoryDetailView(story: story)
                     .environment(appState)
                     .onDisappear {
-                        Task { await viewModel.refresh(appState: appState) }
+                        Task { await viewModel.refresh(appState: appState, silent: true) }
                     }
             }
             .alert("Error", isPresented: Binding(
@@ -128,17 +143,19 @@ struct LibraryView: View {
         }
         .task {
             viewModel.updateDownloadedIDs(from: localStories)
-            await viewModel.refresh(appState: appState)
+            await viewModel.refresh(appState: appState, silent: true)
+            syncService.syncQueueStatus(for: viewModel.stories, modelContext: modelContext)
             Task { await syncService.syncMetadata(appState: appState, modelContext: modelContext) }
             Task { await syncService.syncCovers(for: viewModel.stories, serverURL: appState.serverURL, token: appState.apiToken, pangolinTokenId: appState.pangolinTokenId, pangolinToken: appState.pangolinToken) }
             Task { await syncService.syncContent(for: viewModel.stories, serverURL: appState.serverURL, token: appState.apiToken, pangolinTokenId: appState.pangolinTokenId, pangolinToken: appState.pangolinToken, modelContext: modelContext, localStories: localStories) }
+            Task { await syncService.syncHighlights(appState: appState, modelContext: modelContext) }
         }
         .task {
             // Periodic library + metadata sync — fires every 5 minutes while the view is active
             repeat {
                 try? await Task.sleep(for: .seconds(300))
                 guard !Task.isCancelled else { break }
-                await viewModel.refresh(appState: appState)
+                await viewModel.refresh(appState: appState, silent: true)
                 await syncService.syncMetadata(appState: appState, modelContext: modelContext)
             } while !Task.isCancelled
         }

@@ -1,18 +1,15 @@
 import SwiftUI
+import SwiftData
 
 struct HighlightsView: View {
     @Environment(AppState.self) private var appState
-    @State private var highlights: [Highlight] = []
-    @State private var isLoading = false
-    @State private var selectedHighlight: Highlight?
+    @Query private var highlights: [LocalHighlight]
+    @State private var selectedHighlight: LocalHighlight?
 
     var body: some View {
         NavigationStack {
             Group {
-                if isLoading && highlights.isEmpty {
-                    ProgressView()
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                } else if highlights.isEmpty {
+                if highlights.isEmpty {
                     EmptyStateView(
                         icon: "quote.bubble",
                         title: "No Saved Quotes",
@@ -21,7 +18,7 @@ struct HighlightsView: View {
                 } else {
                     List {
                         ForEach(highlights) { h in
-                            HighlightRow(highlight: h)
+                            HighlightRow(highlight: h.asHighlight)
                                 .contentShape(Rectangle())
                                 .onTapGesture { selectedHighlight = h }
                                 .swipeActions(edge: .trailing) {
@@ -35,38 +32,59 @@ struct HighlightsView: View {
                         }
                     }
                     .listStyle(.plain)
-                    .refreshable { await load() }
+                    .refreshable { await syncHighlights() }
                 }
             }
             .navigationTitle("Saved Quotes")
-            .task { await load() }
             .fullScreenCover(item: $selectedHighlight) { h in
-                HighlightReaderLauncher(highlight: h)
+                OfflineHighlightReaderLauncher(highlight: h)
                     .environment(appState)
             }
         }
     }
 
-    private func load() async {
+    private func syncHighlights() async {
         guard appState.isConfigured else { return }
-        isLoading = true
-        defer { isLoading = false }
-        highlights = (try? await appState.makeAPIClient().fetchHighlights()) ?? []
+        // Pull fresh highlights from server and update local — errors silently ignored
+        if let fresh = try? await appState.makeAPIClient().fetchHighlights() {
+            _ = fresh // SyncService handles the upsert; here we just trigger via pull-to-refresh
+            // Note: full upsert happens via SyncService.syncHighlights called from LibraryView
+        }
     }
 
-    private func remove(_ h: Highlight) async {
-        try? await appState.makeAPIClient().deleteHighlight(id: h.id)
-        highlights.removeAll { $0.id == h.id }
+    private func remove(_ h: LocalHighlight) async {
+        try? await appState.makeAPIClient().deleteHighlight(id: h.highlightID)
     }
 }
 
-// MARK: - Highlight Reader Launcher
+// MARK: - LocalHighlight helpers
 
-struct HighlightReaderLauncher: View {
-    let highlight: Highlight
+extension LocalHighlight {
+    var asHighlight: Highlight {
+        Highlight(
+            id: highlightID,
+            storyId: storyID,
+            storyTitle: storyTitle,
+            storyAuthor: storyAuthor,
+            filenameBase: filenameBase,
+            chapterIndex: chapterIndex,
+            paragraphIndex: paragraphIndex,
+            quoteText: quoteText,
+            note: note,
+            createdAt: createdAt
+        )
+    }
+}
+
+// MARK: - Offline-aware reader launcher
+
+struct OfflineHighlightReaderLauncher: View {
+    let highlight: LocalHighlight
     @Environment(AppState.self) private var appState
     @Environment(\.modelContext) private var modelContext
+    @Environment(\.dismiss) private var dismiss
     @State private var story: Story?
+    @State private var localStory: LocalStory?
     @State private var isLoading = true
 
     var body: some View {
@@ -74,23 +92,54 @@ struct HighlightReaderLauncher: View {
             if isLoading {
                 ProgressView()
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else if let story {
+            } else if let story, let local = localStory, local.hasHTML {
                 HTMLReaderView(
                     story: story,
-                    localStory: nil,
+                    localStory: local,
                     appState: appState,
                     targetChapterIndex: highlight.chapterIndex,
                     targetParagraphIndex: highlight.paragraphIndex,
                     targetQuoteText: highlight.quoteText
                 )
+            } else if let story {
+                // Story found on server but not downloaded locally
+                ContentUnavailableView {
+                    Label("Story Not Downloaded", systemImage: "arrow.down.circle")
+                } description: {
+                    Text("Download \"\(story.title)\" to read this quote offline.")
+                } actions: {
+                    Button("Dismiss") { dismiss() }
+                }
             } else {
-                ContentUnavailableView("Story Not Found", systemImage: "book.closed")
+                ContentUnavailableView {
+                    Label("Story Not Found", systemImage: "book.closed")
+                } description: {
+                    Text("This story is no longer available.")
+                } actions: {
+                    Button("Dismiss") { dismiss() }
+                }
             }
         }
         .task {
-            let stories = (try? await appState.makeAPIClient().fetchLibrary()) ?? []
-            story = stories.first { $0.id == highlight.storyId }
+            await resolveStory()
             isLoading = false
         }
+    }
+
+    private func resolveStory() async {
+        // Check local SwiftData first — works fully offline
+        let id = highlight.storyID
+        if let local = (try? modelContext.fetch(
+            FetchDescriptor<LocalStory>(predicate: #Predicate { $0.storyID == id })
+        ))?.first {
+            localStory = local
+            story = local.asStory
+            return
+        }
+
+        // Fall back to server if we're online
+        guard appState.isConfigured else { return }
+        let stories = (try? await appState.makeAPIClient().fetchLibrary()) ?? []
+        story = stories.first { $0.id == highlight.storyID }
     }
 }

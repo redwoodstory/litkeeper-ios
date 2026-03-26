@@ -66,8 +66,10 @@ struct ServerSettingsView: View {
                         if isTesting {
                             ProgressView()
                                 .padding(.trailing, 4)
+                            Text("Testing…")
+                        } else {
+                            Label("Test Connection", systemImage: "network")
                         }
-                        Text(isTesting ? "Testing…" : "Test Connection")
                     }
                 }
                 .disabled(urlDraft.isEmpty || tokenDraft.isEmpty || isTesting)
@@ -77,18 +79,20 @@ struct ServerSettingsView: View {
                     case .success:
                         Label("Connected successfully", systemImage: "checkmark.circle.fill")
                             .foregroundStyle(.green)
-                    case .failure(let msg):
-                        Label(msg, systemImage: "xmark.circle.fill")
+                    case .failure:
+                        Label("Unreachable", systemImage: "xmark.circle.fill")
                             .foregroundStyle(.red)
-                            .font(.caption)
                     }
                 }
             }
 
             if !urlDraft.isEmpty || !tokenDraft.isEmpty {
                 Section {
-                    Button("Disconnect Server", role: .destructive) {
+                    Button(role: .destructive) {
                         showDisconnectConfirm = true
+                    } label: {
+                        Label("Disconnect Server", systemImage: "trash")
+                            .foregroundStyle(.red)
                     }
                 }
             }

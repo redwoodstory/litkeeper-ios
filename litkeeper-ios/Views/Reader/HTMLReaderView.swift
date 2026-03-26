@@ -120,6 +120,7 @@ struct HTMLReaderView: View {
     @Environment(\.modelContext)  private var modelContext
     @Environment(\.dismiss)       private var dismiss
     @Environment(\.colorScheme)   private var systemColorScheme
+    @Environment(SyncService.self) private var syncService
 
     @AppStorage("reader.fontSize")    private var fontSize:      Double = 17
     @AppStorage("reader.lineSpacing") private var lineSpacing:   Double = 1.58
@@ -193,15 +194,25 @@ struct HTMLReaderView: View {
             }
             let fraction = scrollProgress
             let storyID = story.id
-            print("[HTML] onDisappear: saving fraction=\(String(format: "%.4f", fraction)) (\(Int(fraction * 100))%) to server for story \(storyID)")
-            let progress = ReadingProgress(
-                currentChapter: nil,
-                cfi: nil,
-                percentage: fraction,
-                isCompleted: fraction >= 0.99,
-                lastReadAt: nil
-            )
-            Task { try? await appState.makeAPIClient().saveProgress(storyID: storyID, progress: progress) }
+            let paragraphID = localStory?.readingProgressParagraphID
+            print("[HTML] onDisappear: saving fraction=\(String(format: "%.4f", fraction)) (\(Int(fraction * 100))%) for story \(storyID)")
+
+            // Upsert a pending operation so progress survives if we're offline
+            let existing = (try? modelContext.fetch(
+                FetchDescriptor<PendingOperation>(predicate: #Predicate { $0.storyID == storyID && $0.operationType == "progress" })
+            ))?.first
+            let op: PendingOperation
+            if let existing {
+                op = existing
+            } else {
+                op = PendingOperation(storyID: storyID, operationType: "progress")
+                modelContext.insert(op)
+            }
+            op.progressFraction = fraction
+            op.progressParagraphID = paragraphID
+            try? modelContext.save()
+
+            Task { await syncService.flushPendingOperations(appState: appState, modelContext: modelContext) }
         }
     }
 

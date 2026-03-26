@@ -25,7 +25,7 @@ struct LitKeeperApp: App {
                     }
                 }
         }
-        .modelContainer(for: LocalStory.self)
+        .modelContainer(for: [LocalStory.self, LocalHighlight.self, PendingOperation.self])
     }
 }
 

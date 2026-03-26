@@ -169,6 +169,7 @@ final class SyncService {
                     filenameBase: story.filenameBase,
                     coverFilename: story.cover
                 )
+                record.updateMetadata(from: story)
                 record.epubLocalPath = epubPath
                 record.htmlLocalPath = htmlPath
                 record.coverLocalPath = coverPath
@@ -182,6 +183,125 @@ final class SyncService {
             try? modelContext.save()
             print("[LK-Sync] ✓ Bulk content sync: batch \(index + 1)/\(batches.count) complete (\(batch.count) stories)")
         }
+    }
+
+    // MARK: - Queue Status Sync
+
+    /// Syncs queue status and metadata for all stories from the server.
+    /// Creates LocalStory records for queued stories that haven't been downloaded yet,
+    /// and updates metadata on all existing records so rich data is available offline.
+    func syncQueueStatus(for stories: [Story], modelContext: ModelContext) {
+        guard let localStories = try? modelContext.fetch(FetchDescriptor<LocalStory>()) else { return }
+        var localByID = Dictionary(uniqueKeysWithValues: localStories.map { ($0.storyID, $0) })
+
+        // Don't overwrite inQueue for stories that have a pending local change
+        let pendingQueueIDs: Set<Int> = {
+            let ops = (try? modelContext.fetch(FetchDescriptor<PendingOperation>(
+                predicate: #Predicate { $0.operationType == "queue" }
+            ))) ?? []
+            return Set(ops.map { $0.storyID })
+        }()
+
+        let pendingRatingIDs: Set<Int> = {
+            let ops = (try? modelContext.fetch(FetchDescriptor<PendingOperation>(
+                predicate: #Predicate { $0.operationType == "rating" }
+            ))) ?? []
+            return Set(ops.map { $0.storyID })
+        }()
+
+        for story in stories {
+            if let local = localByID[story.id] {
+                // Only update queue flag if there's no pending local change waiting to sync
+                if !pendingQueueIDs.contains(story.id) {
+                    local.inQueue = story.inQueue ?? false
+                }
+                // Preserve pending rating before updateMetadata overwrites it
+                let savedRating = pendingRatingIDs.contains(story.id) ? local.rating : nil
+                local.updateMetadata(from: story)
+                if let saved = savedRating { local.rating = saved }
+            } else if story.inQueue == true {
+                // Create a metadata-only record for queued stories not yet downloaded
+                let record = LocalStory(
+                    storyID: story.id,
+                    title: story.title,
+                    author: story.author,
+                    filenameBase: story.filenameBase,
+                    coverFilename: story.cover
+                )
+                record.inQueue = true
+                record.updateMetadata(from: story)
+                modelContext.insert(record)
+                localByID[story.id] = record
+            }
+        }
+
+        // Clear queue flag for any local records whose story is no longer in queue
+        let serverIDs = Set(stories.map { $0.id })
+        for local in localStories where !serverIDs.contains(local.storyID) {
+            local.inQueue = false
+        }
+
+        try? modelContext.save()
+        print("[LK-Sync] ✓ Queue status sync: \(localStories.count) local stories updated")
+    }
+
+    // MARK: - Highlights Sync
+
+    private(set) var isSyncingHighlights = false
+
+    func syncHighlights(appState: AppState, modelContext: ModelContext) async {
+        guard appState.isConfigured, !isSyncingHighlights else { return }
+        isSyncingHighlights = true
+        defer { isSyncingHighlights = false }
+
+        let client = appState.makeAPIClient()
+        guard let highlights = try? await client.fetchHighlights() else { return }
+
+        let existing: [LocalHighlight]
+        do {
+            existing = try modelContext.fetch(FetchDescriptor<LocalHighlight>())
+        } catch {
+            print("[LK-Sync] ✗ syncHighlights: fetch failed: \(error)")
+            return
+        }
+
+        let existingByID = Dictionary(uniqueKeysWithValues: existing.map { ($0.highlightID, $0) })
+        let serverIDs = Set(highlights.map { $0.id })
+
+        // Upsert
+        for h in highlights {
+            if let local = existingByID[h.id] {
+                local.storyTitle = h.storyTitle
+                local.storyAuthor = h.storyAuthor
+                local.filenameBase = h.filenameBase
+                local.chapterIndex = h.chapterIndex
+                local.paragraphIndex = h.paragraphIndex
+                local.quoteText = h.quoteText
+                local.note = h.note
+            } else {
+                let local = LocalHighlight(
+                    highlightID: h.id,
+                    storyID: h.storyId,
+                    storyTitle: h.storyTitle,
+                    storyAuthor: h.storyAuthor,
+                    filenameBase: h.filenameBase,
+                    chapterIndex: h.chapterIndex,
+                    paragraphIndex: h.paragraphIndex,
+                    quoteText: h.quoteText,
+                    note: h.note,
+                    createdAt: h.createdAt
+                )
+                modelContext.insert(local)
+            }
+        }
+
+        // Delete highlights removed on the server
+        for local in existing where !serverIDs.contains(local.highlightID) {
+            modelContext.delete(local)
+        }
+
+        try? modelContext.save()
+        print("[LK-Sync] ✓ Highlights sync: \(highlights.count) highlights synced")
     }
 
     // MARK: - Cover Resync (after metadata change)
@@ -207,12 +327,59 @@ final class SyncService {
         print("[LK-Sync] ✓ Cover resynced: \(coverFilename)")
     }
 
+    // MARK: - Pending Operations Flush
+
+    /// Attempts to send all locally-queued operations to the server.
+    /// Records are deleted on success and kept for retry on failure (e.g. still offline).
+    func flushPendingOperations(appState: AppState, modelContext: ModelContext) async {
+        guard appState.isConfigured else { return }
+        let pending = (try? modelContext.fetch(FetchDescriptor<PendingOperation>())) ?? []
+        guard !pending.isEmpty else { return }
+
+        let client = appState.makeAPIClient()
+        var didChange = false
+
+        for op in pending {
+            do {
+                switch op.operationType {
+                case "queue":
+                    try await client.updateQueue(storyID: op.storyID, inQueue: op.inQueue ?? false)
+                case "rating":
+                    try await client.updateRating(storyID: op.storyID, rating: op.rating ?? 0)
+                case "progress":
+                    if let fraction = op.progressFraction {
+                        let progress = ReadingProgress(
+                            currentChapter: nil,
+                            cfi: nil,
+                            percentage: fraction,
+                            isCompleted: fraction >= 0.99,
+                            lastReadAt: nil
+                        )
+                        try await client.saveProgress(storyID: op.storyID, progress: progress)
+                    }
+                default:
+                    break
+                }
+                modelContext.delete(op)
+                didChange = true
+                print("[LK-Sync] ✓ Flushed pending \(op.operationType) op for story \(op.storyID)")
+            } catch {
+                print("[LK-Sync] ✗ Pending \(op.operationType) op for story \(op.storyID) still offline — will retry")
+            }
+        }
+
+        if didChange { try? modelContext.save() }
+    }
+
     // MARK: - Metadata Sync
 
     func syncMetadata(appState: AppState, modelContext: ModelContext) async {
         guard appState.isConfigured, !isSyncingMetadata else { return }
         isSyncingMetadata = true
         defer { isSyncingMetadata = false }
+
+        // Push any locally-queued changes before pulling server state
+        await flushPendingOperations(appState: appState, modelContext: modelContext)
 
         let localStories: [LocalStory]
         do {

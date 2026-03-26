@@ -13,15 +13,15 @@ struct QueueView: View {
                     EmptyStateView(
                         icon: "server.rack",
                         title: "Server Not Configured",
-                        message: "Add your server URL and API token in Settings."
+                        message: "Add your server URL and API token in Settings to manage downloads."
                     )
                 } else if viewModel.isLoading && viewModel.items.isEmpty {
                     QueueSkeletonView()
                 } else if viewModel.items.isEmpty {
                     EmptyStateView(
                         icon: "clock",
-                        title: "Queue Empty",
-                        message: "Stories you add will appear here while downloading."
+                        title: "No History Yet",
+                        message: "Your server's download history will appear here."
                     )
                 } else {
                     List {
@@ -59,7 +59,7 @@ struct QueueView: View {
             }
         }
         .task {
-            await viewModel.refresh(appState: appState)
+            await viewModel.refresh(appState: appState, silent: true)
         }
         .onAppear { viewModel.startAutoRefresh(appState: appState) }
         .onDisappear { viewModel.stopAutoRefresh() }

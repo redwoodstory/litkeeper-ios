@@ -131,8 +131,8 @@ struct StoryDetailView: View {
             }
         }
         .onAppear {
-            currentRating = story.rating
-            isInQueue = story.inQueue
+            currentRating = localStory?.rating ?? story.rating
+            isInQueue = localStory?.inQueue ?? story.inQueue ?? false
             editableTitle = story.title
             editableAuthor = story.author
             editableCategory = story.category ?? ""
@@ -234,7 +234,7 @@ struct StoryDetailView: View {
                         HapticManager.shared.impact(.light)
                         isInQueue.toggle()
                         let newValue = isInQueue
-                        Task { try? await appState.makeAPIClient().updateQueue(storyID: story.id, inQueue: newValue) }
+                        enqueueQueueOp(inQueue: newValue)
                     } label: {
                         Image(systemName: isInQueue ? "list.bullet.circle.fill" : "list.bullet.circle")
                             .font(.title)
@@ -251,7 +251,7 @@ struct StoryDetailView: View {
                 // Rating
                 RatingView(rating: currentRating) { newRating in
                     currentRating = newRating == 0 ? nil : newRating
-                    Task { try? await appState.makeAPIClient().updateRating(storyID: story.id, rating: newRating) }
+                    enqueueRatingOp(rating: newRating)
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -285,7 +285,7 @@ struct StoryDetailView: View {
                     HapticManager.shared.impact(.light)
                     isInQueue.toggle()
                     let newValue = isInQueue
-                    Task { try? await appState.makeAPIClient().updateQueue(storyID: story.id, inQueue: newValue) }
+                    enqueueQueueOp(inQueue: newValue)
                 } label: {
                     HStack(spacing: 6) {
                         Image(systemName: isInQueue ? "bookmark.fill" : "bookmark")
@@ -421,6 +421,51 @@ struct StoryDetailView: View {
     }
 
     // MARK: - Helpers
+
+    private func enqueueQueueOp(inQueue: Bool) {
+        if let local = localStory {
+            local.inQueue = inQueue
+        } else {
+            // Story not yet downloaded — create a metadata-only record so the state
+            // survives onAppear re-fires and appears correctly in the queue view.
+            let record = LocalStory(
+                storyID: story.id,
+                title: story.title,
+                author: story.author,
+                filenameBase: story.filenameBase,
+                coverFilename: story.cover
+            )
+            record.updateMetadata(from: story)
+            record.inQueue = inQueue
+            modelContext.insert(record)
+        }
+        upsertPendingOp(type: "queue") { $0.inQueue = inQueue }
+        Task { await syncService.flushPendingOperations(appState: appState, modelContext: modelContext) }
+    }
+
+    private func enqueueRatingOp(rating: Int) {
+        if let local = localStory {
+            local.rating = rating == 0 ? nil : rating
+        }
+        upsertPendingOp(type: "rating") { $0.rating = rating }
+        Task { await syncService.flushPendingOperations(appState: appState, modelContext: modelContext) }
+    }
+
+    private func upsertPendingOp(type: String, configure: (PendingOperation) -> Void) {
+        let storyID = story.id
+        let existing = (try? modelContext.fetch(
+            FetchDescriptor<PendingOperation>(predicate: #Predicate { $0.storyID == storyID && $0.operationType == type })
+        ))?.first
+        let op: PendingOperation
+        if let existing {
+            op = existing
+        } else {
+            op = PendingOperation(storyID: storyID, operationType: type)
+            modelContext.insert(op)
+        }
+        configure(op)
+        try? modelContext.save()
+    }
 
     @ViewBuilder
     private func statCell(value: String, label: String) -> some View {

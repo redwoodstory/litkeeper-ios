@@ -19,8 +19,8 @@ enum APIError: LocalizedError {
             return "Not found."
         case .serverError(let code):
             return "Server error (\(code))."
-        case .networkError(let error):
-            return "Network error: \(error.localizedDescription)"
+        case .networkError:
+            return "Can't reach the server. Check your connection and try again."
         case .decodingError(let error):
             return "Data error: \(error.localizedDescription)"
         case .invalidURL:

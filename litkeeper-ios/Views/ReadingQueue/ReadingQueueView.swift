@@ -1,8 +1,10 @@
 import SwiftUI
+import SwiftData
 
 struct ReadingQueueView: View {
     @Environment(AppState.self) private var appState
     @Environment(SyncService.self) private var syncService
+    @Query private var localStories: [LocalStory]
 
     @State private var viewModel = ReadingQueueViewModel()
     @State private var selectedStory: Story?
@@ -18,15 +20,16 @@ struct ReadingQueueView: View {
                     )
                 } else if viewModel.isLoading && viewModel.stories.isEmpty {
                     ReadingQueueSkeletonView()
-                } else if viewModel.queuedStories.isEmpty {
+                } else if viewModel.queuedStories.isEmpty && offlineQueue.isEmpty {
                     EmptyStateView(
                         icon: "list.bullet",
                         title: "Reading Queue Empty",
                         message: "Open a story and add it to your reading queue."
                     )
                 } else {
+                    let stories = viewModel.queuedStories.isEmpty ? offlineQueue.map { $0.asStory } : viewModel.queuedStories
                     List {
-                        ForEach(viewModel.queuedStories) { story in
+                        ForEach(stories) { story in
                             Button {
                                 selectedStory = story
                             } label: {
@@ -69,7 +72,7 @@ struct ReadingQueueView: View {
                 StoryDetailView(story: story)
                     .environment(appState)
                     .onDisappear {
-                        Task { await viewModel.refresh(appState: appState) }
+                        Task { await viewModel.refresh(appState: appState, silent: true) }
                     }
             }
             .alert("Error", isPresented: Binding(
@@ -82,15 +85,19 @@ struct ReadingQueueView: View {
             }
         }
         .task {
-            await viewModel.refresh(appState: appState)
+            await viewModel.refresh(appState: appState, silent: true)
         }
         .onChange(of: appState.isConfigured) { wasConfigured, isConfigured in
             if isConfigured && !wasConfigured {
-                Task { await viewModel.refresh(appState: appState) }
+                Task { await viewModel.refresh(appState: appState, silent: true) }
             } else if !isConfigured {
                 viewModel.stories = []
             }
         }
+    }
+
+    private var offlineQueue: [LocalStory] {
+        localStories.filter { $0.inQueue }
     }
 
     private func coverURL(for story: Story) -> URL? {

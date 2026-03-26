@@ -7,6 +7,7 @@ final class LibraryViewModel {
     var stories: [Story] = []
     var isLoading = false
     var errorMessage: String? = nil
+    private var hasAttemptedLoad = false
 
     // Filter/sort state
     var searchText = ""
@@ -77,20 +78,24 @@ final class LibraryViewModel {
         downloadedStoryIDs.contains(story.id)
     }
 
-    func refresh(appState: AppState) async {
+    func refresh(appState: AppState, silent: Bool = false) async {
         guard appState.isConfigured else {
-            errorMessage = "Configure your server in Settings."
+            stories = []
             return
         }
-        isLoading = true
+        if !silent || (!hasAttemptedLoad && stories.isEmpty) { isLoading = true }
         errorMessage = nil
         let client = appState.makeAPIClient()
         do {
             stories = try await client.fetchLibrary()
+        } catch let error as APIError {
+            if case .networkError = error { /* transient — never alert; cached data remains */ }
+            else if !silent { errorMessage = error.localizedDescription }
         } catch {
-            errorMessage = error.localizedDescription
+            if !silent { errorMessage = error.localizedDescription }
         }
         isLoading = false
+        hasAttemptedLoad = true
     }
 
     func updateDownloadedIDs(from localStories: [LocalStory]) {

@@ -10,6 +10,7 @@ final class ReadingQueueViewModel {
     var downloadedStoryIDs: Set<Int> = []
     // Server progress keyed by story ID, 0-1 scale
     var progressByStoryID: [Int: Double] = [:]
+    private var hasAttemptedLoad = false
 
     var queuedStories: [Story] {
         stories
@@ -41,18 +42,25 @@ final class ReadingQueueViewModel {
         }
     }
 
-    func refresh(appState: AppState) async {
-        guard appState.isConfigured else { return }
-        isLoading = true
+    func refresh(appState: AppState, silent: Bool = false) async {
+        guard appState.isConfigured else {
+            stories = []
+            return
+        }
+        if !silent || (!hasAttemptedLoad && stories.isEmpty) { isLoading = true }
         errorMessage = nil
         let client = appState.makeAPIClient()
         do {
             stories = try await client.fetchLibrary()
             await fetchProgressForQueue(client: client)
+        } catch let error as APIError {
+            if case .networkError = error { /* transient — never alert */ }
+            else if !silent { errorMessage = error.localizedDescription }
         } catch {
-            errorMessage = error.localizedDescription
+            if !silent { errorMessage = error.localizedDescription }
         }
         isLoading = false
+        hasAttemptedLoad = true
     }
 
     private func fetchProgressForQueue(client: APIClient) async {

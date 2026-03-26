@@ -3,6 +3,8 @@ import SwiftUI
 struct StoryCard: View {
     let story: Story
     let isDownloaded: Bool
+    var isInQueue: Bool = false
+    var isFavorited: Bool = false
     let coverURL: URL?
     var token: String = ""
     var pangolinTokenId: String = ""
@@ -22,10 +24,10 @@ struct StoryCard: View {
                 if isDownloaded {
                     badge("checkmark.circle.fill", color: .green)
                 }
-                if story.inQueue {
+                if isInQueue {
                     badge("bookmark.fill", color: .blue)
                 }
-                if let rating = story.rating, rating == 5 {
+                if isFavorited {
                     badge("heart.fill", color: .pink)
                 }
             }

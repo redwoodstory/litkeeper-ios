@@ -111,6 +111,7 @@ final class DownloadManager {
             filenameBase: story.filenameBase,
             coverFilename: story.cover
         )
+        record.updateMetadata(from: story)
         record.epubLocalPath = epubPath
         record.htmlLocalPath = htmlPath
         record.coverLocalPath = coverPath
