@@ -90,14 +90,14 @@ final class DownloadManager {
             onProgress(0.85, "HTML saved")
         }
 
-        // 3. Cover
-        if let coverFilename = story.cover {
-            onProgress(0.85, "Downloading cover…")
-            let url = base.appendingPathComponent("api/cover/\(coverFilename)")
-            let dest = localCoverURL(filename: coverFilename)
-            try? await downloadFile(from: url, token: token, pangolinTokenId: pangolinTokenId, pangolinToken: pangolinToken, to: dest)
-            coverPath = coverFilename
-        }
+        // 3. Cover — use story.cover if set, fall back to filenameBase.jpg (same
+        //    logic as coverURL and syncCovers so all three paths stay consistent).
+        let coverFilename = story.cover ?? "\(story.filenameBase).jpg"
+        onProgress(0.85, "Downloading cover…")
+        let coverRemoteURL = base.appendingPathComponent("api/cover/\(coverFilename)")
+        let coverDest = localCoverURL(filename: coverFilename)
+        try? await downloadFile(from: coverRemoteURL, token: token, pangolinTokenId: pangolinTokenId, pangolinToken: pangolinToken, to: coverDest)
+        coverPath = coverFilename
 
         // 4. Persist to SwiftData
         let storyID = story.id

@@ -367,6 +367,17 @@ final class SyncService {
                     if let timestamp = op.lastOpenedAt {
                         try await client.updateLastOpened(storyID: op.storyID, timestamp: timestamp)
                     }
+                case "highlight":
+                    if let chapter = op.highlightChapterIndex,
+                       let paragraph = op.highlightParagraphIndex,
+                       let text = op.highlightText {
+                        try await client.saveHighlight(
+                            storyID: op.storyID,
+                            chapterIndex: chapter,
+                            paragraphIndex: paragraph,
+                            quoteText: text
+                        )
+                    }
                 default:
                     break
                 }

@@ -143,6 +143,7 @@ struct HTMLReaderView: View {
     @State private var readerItems: [ReaderItem] = []
     @State private var quoteAlertVisible = false
     @State private var quoteErrorAlertVisible = false
+    @State private var quoteSavedOfflineAlertVisible = false
     @State private var showSaveQuoteDialog = false
     @State private var pendingQuoteChapter: Int? = nil
     @State private var pendingQuoteParagraph: Int? = nil
@@ -519,6 +520,11 @@ struct HTMLReaderView: View {
         .alert("Could Not Save Quote", isPresented: $quoteErrorAlertVisible) {
             Button("OK", role: .cancel) {}
         }
+        .alert("Quote Saved", isPresented: $quoteSavedOfflineAlertVisible) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text("You're offline. This quote will sync to the server when you reconnect.")
+        }
     }
 
     // MARK: - Story header card (mirrors Flask .story-header)
@@ -670,10 +676,40 @@ struct HTMLReaderView: View {
                 paragraphIndex: paragraphIndex,
                 quoteText: text
             )
+            await syncService.syncHighlights(appState: appState, modelContext: modelContext)
             HapticManager.shared.notify(.success)
             await MainActor.run { quoteAlertVisible = true }
         } catch {
-            await MainActor.run { quoteErrorAlertVisible = true }
+            // If offline, queue the highlight and insert a temporary LocalHighlight
+            // so it appears immediately in the quotes view. The temp record (highlightID 0)
+            // is replaced by the real server record on next sync.
+            let storyID = story.id
+            let storyTitle = story.title
+            let storyAuthor = story.author
+            let filenameBase = story.filenameBase
+            await MainActor.run {
+                let op = PendingOperation(storyID: storyID, operationType: "highlight")
+                op.highlightChapterIndex = chapterIndex
+                op.highlightParagraphIndex = paragraphIndex
+                op.highlightText = text
+                modelContext.insert(op)
+                let tempHighlight = LocalHighlight(
+                    highlightID: 0,
+                    storyID: storyID,
+                    storyTitle: storyTitle,
+                    storyAuthor: storyAuthor,
+                    filenameBase: filenameBase,
+                    chapterIndex: chapterIndex,
+                    paragraphIndex: paragraphIndex,
+                    quoteText: text,
+                    createdAt: ISO8601DateFormatter().string(from: Date())
+                )
+                modelContext.insert(tempHighlight)
+                try? modelContext.save()
+                HapticManager.shared.notify(.success)
+                quoteSavedOfflineAlertVisible = true
+            }
+            Task { await syncService.flushPendingOperations(appState: appState, modelContext: modelContext) }
         }
     }
 
@@ -691,7 +727,9 @@ struct HTMLReaderView: View {
         let serverBase    = appState.serverURL.hasSuffix("/")
             ? String(appState.serverURL.dropLast())
             : appState.serverURL
-        let apiToken      = appState.apiToken
+        let apiToken         = appState.apiToken
+        let pangolinTokenId  = appState.pangolinTokenId
+        let pangolinToken    = appState.pangolinToken
 
         // ── 1. Load story JSON ────────────────────────────────────────────
         let decoded: StoryContent
@@ -714,6 +752,12 @@ struct HTMLReaderView: View {
             var request = URLRequest(url: url)
             if !apiToken.isEmpty {
                 request.setValue("Bearer \(apiToken)", forHTTPHeaderField: "Authorization")
+            }
+            if !pangolinTokenId.isEmpty {
+                request.setValue(pangolinTokenId, forHTTPHeaderField: "P-Access-Token-Id")
+            }
+            if !pangolinToken.isEmpty {
+                request.setValue(pangolinToken, forHTTPHeaderField: "P-Access-Token")
             }
             do {
                 let (data, response) = try await URLSession.shared.data(for: request)
@@ -760,7 +804,7 @@ struct HTMLReaderView: View {
                         let stripped = paraHTML
                             .replacingOccurrences(of: "<[^>]+>", with: "", options: .regularExpression)
                             .trimmingCharacters(in: .whitespacesAndNewlines)
-                        if stripped.contains(needle) || needle.contains(stripped) {
+                        if stripped.contains(needle) {
                             let flatIndex = decoded.flatIndex(chapterIndex: ci, paragraphIndex: pi)
                             resolvedTargetScrollID = "para-\(flatIndex)"
                             resolvedHighlightFlatIndex = flatIndex

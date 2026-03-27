@@ -10,6 +10,7 @@ struct ServerSettingsView: View {
     @State private var testResult: TestResult? = nil
     @State private var isTesting = false
     @State private var showDisconnectConfirm = false
+    @State private var hasAppeared = false
 
     enum TestResult {
         case success
@@ -104,20 +105,29 @@ struct ServerSettingsView: View {
             tokenDraft = appState.apiToken
             pangolinTokenIdDraft = appState.pangolinTokenId
             pangolinTokenDraft = appState.pangolinToken
+            // Mark as appeared AFTER setting drafts so onChange handlers below
+            // don't write back to appState during initialization (which would
+            // cause isConfigured to flicker false→true and trigger a spurious
+            // library refresh or, worse, briefly clear the displayed library).
+            hasAppeared = true
         }
         .onChange(of: urlDraft) { _, new in
+            guard hasAppeared else { return }
             appState.serverURL = new
             testResult = nil
         }
         .onChange(of: tokenDraft) { _, new in
+            guard hasAppeared else { return }
             appState.apiToken = new
             testResult = nil
         }
         .onChange(of: pangolinTokenIdDraft) { _, new in
+            guard hasAppeared else { return }
             appState.pangolinTokenId = new
             testResult = nil
         }
         .onChange(of: pangolinTokenDraft) { _, new in
+            guard hasAppeared else { return }
             appState.pangolinToken = new
             testResult = nil
         }

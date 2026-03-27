@@ -3,6 +3,8 @@ import SwiftData
 
 struct HighlightsView: View {
     @Environment(AppState.self) private var appState
+    @Environment(SyncService.self) private var syncService
+    @Environment(\.modelContext) private var modelContext
     @Query private var highlights: [LocalHighlight]
     @State private var selectedHighlight: LocalHighlight?
 
@@ -44,12 +46,7 @@ struct HighlightsView: View {
     }
 
     private func syncHighlights() async {
-        guard appState.isConfigured else { return }
-        // Pull fresh highlights from server and update local — errors silently ignored
-        if let fresh = try? await appState.makeAPIClient().fetchHighlights() {
-            _ = fresh // SyncService handles the upsert; here we just trigger via pull-to-refresh
-            // Note: full upsert happens via SyncService.syncHighlights called from LibraryView
-        }
+        await syncService.syncHighlights(appState: appState, modelContext: modelContext)
     }
 
     private func remove(_ h: LocalHighlight) async {

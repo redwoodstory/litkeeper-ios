@@ -5,6 +5,7 @@ struct LibraryView: View {
     @Environment(AppState.self) private var appState
     @Environment(SyncService.self) private var syncService
     @Environment(\.modelContext) private var modelContext
+    @Environment(\.scenePhase) private var scenePhase
     @Query private var localStories: [LocalStory]
 
     @State private var viewModel = LibraryViewModel()
@@ -37,15 +38,36 @@ struct LibraryView: View {
                         message: "Add your server URL and API token in Settings to get started."
                     )
                 } else if viewModel.filteredStories.isEmpty {
-                    EmptyStateView(
-                        icon: "books.vertical",
-                        title: viewModel.stories.isEmpty ? "Library Empty" : "No Results",
-                        message: viewModel.stories.isEmpty
-                            ? "Submit a Literotica URL to download your first story."
-                            : "Try adjusting your search or filters."
-                    )
+                    VStack(spacing: 16) {
+                        EmptyStateView(
+                            icon: viewModel.errorMessage != nil ? "wifi.slash" : "books.vertical",
+                            title: viewModel.errorMessage != nil ? "Server Unreachable" : (viewModel.stories.isEmpty ? "Library Empty" : "No Results"),
+                            message: viewModel.errorMessage != nil
+                                ? "Could not connect to your server. Check your connection or settings."
+                                : (viewModel.stories.isEmpty
+                                    ? "Submit a Literotica URL to download your first story."
+                                    : "Try adjusting your search or filters.")
+                        )
+                        if viewModel.errorMessage != nil || viewModel.stories.isEmpty {
+                            Button {
+                                Task { await viewModel.refresh(appState: appState) }
+                            } label: {
+                                Label("Retry", systemImage: "arrow.clockwise")
+                                    .font(.subheadline)
+                            }
+                            .buttonStyle(.bordered)
+                        }
+                    }
                 } else {
                     ScrollView {
+                        if viewModel.isShowingCachedData {
+                            Label("Showing last synced library — server unreachable", systemImage: "wifi.slash")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .padding(.horizontal)
+                                .padding(.top, 8)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
                         LazyVGrid(columns: columns, spacing: 16) {
                             ForEach(Array(viewModel.filteredStories.enumerated()), id: \.element.id) { index, story in
                                 Button {
@@ -162,8 +184,13 @@ struct LibraryView: View {
         .onChange(of: appState.isConfigured) { wasConfigured, isConfigured in
             if isConfigured && !wasConfigured {
                 Task { await viewModel.refresh(appState: appState) }
-            } else if !isConfigured {
-                viewModel.stories = []
+            }
+            // Do not clear stories when isConfigured becomes false — it may be a transient
+            // flicker during ServerSettingsView initialization and would wipe the visible library.
+        }
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active {
+                Task { await viewModel.refresh(appState: appState, silent: true) }
             }
         }
         .onChange(of: localStories) { _, new in

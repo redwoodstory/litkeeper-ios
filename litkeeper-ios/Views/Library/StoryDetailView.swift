@@ -24,6 +24,7 @@ struct StoryDetailView: View {
     @State private var editableTags: [String] = []
     @State private var showEditStory = false
     @State private var safariURL: URL? = nil
+    @State private var localFilesExpanded = false
 
     private var localStory: LocalStory? {
         localStories.first { $0.storyID == story.id }
@@ -61,6 +62,9 @@ struct StoryDetailView: View {
                 if !editableTags.isEmpty {
                     tagsSection
                 }
+
+                // Local files (collapsed by default)
+                localFilesSection
 
                 // Utility: offline + delete
                 utilitySection
@@ -267,21 +271,6 @@ struct StoryDetailView: View {
         Section {
             HStack(spacing: 10) {
                 Button {
-                    showHTMLReader = true
-                } label: {
-                    HStack(spacing: 6) {
-                        Image(systemName: "doc.text")
-                        Text("Read")
-                            .fontWeight(.semibold)
-                    }
-                    .frame(maxWidth: .infinity)
-                    .frame(height: 50)
-                }
-                .buttonStyle(.bordered)
-                .tint(.accentColor)
-                .disabled(!canReadHTML)
-
-                Button {
                     HapticManager.shared.impact(.light)
                     isInQueue.toggle()
                     let newValue = isInQueue
@@ -298,6 +287,21 @@ struct StoryDetailView: View {
                 }
                 .buttonStyle(.bordered)
                 .tint(isInQueue ? .accentColor : .secondary)
+
+                Button {
+                    showHTMLReader = true
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: "doc.text")
+                        Text("Read")
+                            .fontWeight(.semibold)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 50)
+                }
+                .buttonStyle(.bordered)
+                .tint(.accentColor)
+                .disabled(!canReadHTML)
             }
             .listRowInsets(EdgeInsets(top: 12, leading: 16, bottom: 12, trailing: 16))
 
@@ -417,6 +421,69 @@ struct StoryDetailView: View {
                 .tint(.red)
             }
             .listRowInsets(EdgeInsets(top: 12, leading: 16, bottom: 12, trailing: 16))
+        }
+    }
+
+    // MARK: - Local files section
+
+    @ViewBuilder
+    private var localFilesSection: some View {
+        Section {
+            DisclosureGroup(isExpanded: $localFilesExpanded) {
+                if let local = localStory {
+                    if let path = local.epubLocalPath {
+                        localFileRow(name: path,
+                                     url: DownloadManager.shared.epubDirectory.appendingPathComponent(path),
+                                     icon: "doc.fill")
+                    }
+                    if let path = local.htmlLocalPath {
+                        localFileRow(name: path,
+                                     url: DownloadManager.shared.htmlDirectory.appendingPathComponent(path),
+                                     icon: "doc.text.fill")
+                    }
+                    if let path = local.coverLocalPath {
+                        localFileRow(name: path,
+                                     url: DownloadManager.shared.coversDirectory.appendingPathComponent(path),
+                                     icon: "photo.fill")
+                    } else {
+                        // Cover may exist on disk via syncCovers even if coverLocalPath wasn't
+                        // recorded (e.g. stories downloaded before the fallback fix).
+                        let fallback = local.coverFilename ?? "\(local.filenameBase).jpg"
+                        let fallbackURL = DownloadManager.shared.coversDirectory.appendingPathComponent(fallback)
+                        if FileManager.default.fileExists(atPath: fallbackURL.path) {
+                            localFileRow(name: fallback, url: fallbackURL, icon: "photo.fill")
+                        }
+                    }
+                    LabeledContent("Downloaded") {
+                        Text(formatDateShort(ISO8601DateFormatter().string(from: local.downloadedAt)))
+                            .foregroundStyle(.secondary)
+                            .font(.subheadline)
+                    }
+                } else {
+                    Text("No files on this device")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+            } label: {
+                Label("Local Files", systemImage: "internaldrive")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func localFileRow(name: String, url: URL, icon: String) -> some View {
+        let bytes = (try? FileManager.default.attributesOfItem(atPath: url.path))?[FileAttributeKey.size] as? Int ?? 0
+        LabeledContent {
+            Text(formatSize(bytes))
+                .foregroundStyle(.secondary)
+                .font(.subheadline)
+        } label: {
+            Label(name, systemImage: icon)
+                .font(.subheadline)
+                .lineLimit(1)
+                .truncationMode(.middle)
         }
     }
 
