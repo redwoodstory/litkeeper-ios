@@ -141,13 +141,13 @@ final class SyncService {
 
                 if let b64 = content.epub, let filename = content.epubFilename,
                    let data = Data(base64Encoded: b64) {
-                    try? data.write(to: dm.localEPUBURL(filenameBase: story.filenameBase))
+                    try? data.write(to: dm.localEPUBURL(storyID: story.id, filenameBase: story.filenameBase))
                     epubPath = filename
                 }
 
                 if let b64 = content.html, let filename = content.htmlFilename,
                    let data = Data(base64Encoded: b64) {
-                    try? data.write(to: dm.localHTMLURL(filenameBase: story.filenameBase))
+                    try? data.write(to: dm.localHTMLURL(storyID: story.id, filenameBase: story.filenameBase))
                     htmlPath = filename
                 }
 

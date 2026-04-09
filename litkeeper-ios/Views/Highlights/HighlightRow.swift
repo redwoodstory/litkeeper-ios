@@ -25,14 +25,16 @@ struct HighlightRow: View {
         let f2 = ISO8601DateFormatter()
         f2.formatOptions = [.withInternetDateTime]
         if let d = f2.date(from: raw) { return d }
-        // Python isoformat() with no timezone, with microseconds
+        // Python isoformat() with no timezone, with microseconds — server stores UTC
         let f3 = DateFormatter()
         f3.locale = Locale(identifier: "en_US_POSIX")
+        f3.timeZone = TimeZone(secondsFromGMT: 0)
         f3.dateFormat = "yyyy-MM-dd'T'HH:mm:ss.SSSSSS"
         if let d = f3.date(from: raw) { return d }
         // Without microseconds
         let f4 = DateFormatter()
         f4.locale = Locale(identifier: "en_US_POSIX")
+        f4.timeZone = TimeZone(secondsFromGMT: 0)
         f4.dateFormat = "yyyy-MM-dd'T'HH:mm:ss"
         return f4.date(from: raw)
     }

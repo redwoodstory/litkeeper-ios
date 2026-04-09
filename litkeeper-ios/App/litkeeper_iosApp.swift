@@ -31,6 +31,7 @@ struct LitKeeperApp: App {
 
 struct RootView: View {
     @Environment(AppState.self) private var appState
+    @Environment(\.modelContext) private var modelContext
     @State private var selectedTab = 0
 
     var body: some View {
@@ -66,6 +67,9 @@ struct RootView: View {
         )) {
             LockView()
                 .environment(appState)
+        }
+        .task {
+            DownloadManager.shared.migrateToIDPrefixedFiles(modelContext: modelContext)
         }
     }
 }

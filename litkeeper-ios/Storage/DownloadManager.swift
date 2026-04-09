@@ -24,24 +24,24 @@ final class DownloadManager {
 
     // MARK: - URL helpers
 
-    func localEPUBURL(filenameBase: String) -> URL {
-        epubDirectory.appendingPathComponent("\(filenameBase).epub")
+    func localEPUBURL(storyID: Int, filenameBase: String) -> URL {
+        epubDirectory.appendingPathComponent("\(storyID)_\(filenameBase).epub")
     }
 
-    func localHTMLURL(filenameBase: String) -> URL {
-        htmlDirectory.appendingPathComponent("\(filenameBase).json")
+    func localHTMLURL(storyID: Int, filenameBase: String) -> URL {
+        htmlDirectory.appendingPathComponent("\(storyID)_\(filenameBase).json")
     }
 
     func localCoverURL(filename: String) -> URL {
         coversDirectory.appendingPathComponent(filename)
     }
 
-    func epubExists(filenameBase: String) -> Bool {
-        FileManager.default.fileExists(atPath: localEPUBURL(filenameBase: filenameBase).path)
+    func epubExists(storyID: Int, filenameBase: String) -> Bool {
+        FileManager.default.fileExists(atPath: localEPUBURL(storyID: storyID, filenameBase: filenameBase).path)
     }
 
-    func htmlExists(filenameBase: String) -> Bool {
-        FileManager.default.fileExists(atPath: localHTMLURL(filenameBase: filenameBase).path)
+    func htmlExists(storyID: Int, filenameBase: String) -> Bool {
+        FileManager.default.fileExists(atPath: localHTMLURL(storyID: storyID, filenameBase: filenameBase).path)
     }
 
     // MARK: - Download
@@ -74,9 +74,9 @@ final class DownloadManager {
         if story.hasEPUB {
             onProgress(0.0, "Downloading EPUB…")
             let url = base.appendingPathComponent("epub/file/\(story.id)")
-            let dest = localEPUBURL(filenameBase: story.filenameBase)
+            let dest = localEPUBURL(storyID: story.id, filenameBase: story.filenameBase)
             try await downloadFile(from: url, token: token, pangolinTokenId: pangolinTokenId, pangolinToken: pangolinToken, to: dest)
-            epubPath = "\(story.filenameBase).epub"
+            epubPath = "\(story.id)_\(story.filenameBase).epub"
             onProgress(0.5, "EPUB saved")
         }
 
@@ -84,9 +84,9 @@ final class DownloadManager {
         if story.hasHTML {
             onProgress(story.hasEPUB ? 0.5 : 0.0, "Downloading HTML…")
             let url = base.appendingPathComponent("download/\(story.filenameBase).json")
-            let dest = localHTMLURL(filenameBase: story.filenameBase)
+            let dest = localHTMLURL(storyID: story.id, filenameBase: story.filenameBase)
             try await downloadFile(from: url, token: token, pangolinTokenId: pangolinTokenId, pangolinToken: pangolinToken, to: dest)
-            htmlPath = "\(story.filenameBase).json"
+            htmlPath = "\(story.id)_\(story.filenameBase).json"
             onProgress(0.85, "HTML saved")
         }
 
@@ -165,6 +165,47 @@ final class DownloadManager {
             }
         }
         return total
+    }
+
+    // MARK: - Migration
+
+    /// Renames locally-stored story files from the legacy "{filenameBase}.epub/.json"
+    /// naming to the new "{storyID}_{filenameBase}.epub/.json" convention, and updates
+    /// the corresponding LocalStory records. Safe to call multiple times — only acts
+    /// when the old name exists and the new name does not.
+    func migrateToIDPrefixedFiles(modelContext: ModelContext) {
+        let key = "didMigrateToIDPrefixedFiles_v1"
+        guard !UserDefaults.standard.bool(forKey: key) else { return }
+        defer { UserDefaults.standard.set(true, forKey: key) }
+
+        guard let records = try? modelContext.fetch(FetchDescriptor<LocalStory>()) else { return }
+        var changed = false
+
+        for record in records {
+            let sid = record.storyID
+            let base = record.filenameBase
+
+            let oldEPUB = epubDirectory.appendingPathComponent("\(base).epub")
+            let newEPUB = epubDirectory.appendingPathComponent("\(sid)_\(base).epub")
+            if FileManager.default.fileExists(atPath: oldEPUB.path),
+               !FileManager.default.fileExists(atPath: newEPUB.path) {
+                try? FileManager.default.moveItem(at: oldEPUB, to: newEPUB)
+                record.epubLocalPath = "\(sid)_\(base).epub"
+                changed = true
+            }
+
+            let oldHTML = htmlDirectory.appendingPathComponent("\(base).json")
+            let newHTML = htmlDirectory.appendingPathComponent("\(sid)_\(base).json")
+            if FileManager.default.fileExists(atPath: oldHTML.path),
+               !FileManager.default.fileExists(atPath: newHTML.path) {
+                try? FileManager.default.moveItem(at: oldHTML, to: newHTML)
+                record.htmlLocalPath = "\(sid)_\(base).json"
+                changed = true
+            }
+        }
+
+        if changed { try? modelContext.save() }
+        print("[LK-Migrate] ✓ File migration to ID-prefixed names complete")
     }
 
     // MARK: - Integrity check

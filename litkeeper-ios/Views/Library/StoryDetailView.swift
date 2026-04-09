@@ -27,7 +27,24 @@ struct StoryDetailView: View {
     @State private var localFilesExpanded = false
 
     private var localStory: LocalStory? {
-        localStories.first { $0.storyID == story.id }
+        // First try exact match by storyID + filenameBase
+        if let exact = localStories.first(where: { $0.storyID == story.id && $0.filenameBase == story.filenameBase }) {
+            return exact
+        }
+        // Fall back to filenameBase match (handles server re-imports where storyID changed)
+        // Only return if files actually exist to avoid false positives
+        if let byFilename = localStories.first(where: { $0.filenameBase == story.filenameBase }) {
+            let filesExist = (byFilename.htmlLocalPath != nil && fileExists(byFilename.htmlLocalPath!, in: DownloadManager.shared.htmlDirectory))
+                || (byFilename.epubLocalPath != nil && fileExists(byFilename.epubLocalPath!, in: DownloadManager.shared.epubDirectory))
+            if filesExist {
+                return byFilename
+            }
+        }
+        return nil
+    }
+
+    private func fileExists(_ path: String, in directory: URL) -> Bool {
+        FileManager.default.fileExists(atPath: directory.appendingPathComponent(path).path)
     }
 
     private var isDownloaded: Bool { localStory != nil }
