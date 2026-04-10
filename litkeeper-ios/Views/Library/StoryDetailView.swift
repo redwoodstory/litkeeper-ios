@@ -59,9 +59,6 @@ struct StoryDetailView: View {
                     .listRowBackground(Color.clear)
                     .listRowSeparator(.hidden)
 
-                // Read buttons
-                readSection
-
                 // Reading progress
                 if let local = localStory, let pct = local.readingProgressPercentage, pct > 0 {
                     progressSection(local: local, percentage: pct)
@@ -274,60 +271,30 @@ struct StoryDetailView: View {
                     currentRating = newRating == 0 ? nil : newRating
                     enqueueRatingOp(rating: newRating)
                 }
+
+                // Primary action
+                Button {
+                    showHTMLReader = true
+                } label: {
+                    Text("Read")
+                        .fontWeight(.semibold)
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.large)
+                .disabled(!canReadHTML)
+                .padding(.top, 6)
+
+                if let err = downloadError {
+                    Label(err, systemImage: "exclamationmark.triangle.fill")
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 20)
-    }
-
-    // MARK: - Read section
-
-    @ViewBuilder
-    private var readSection: some View {
-        Section {
-            HStack(spacing: 10) {
-                Button {
-                    HapticManager.shared.impact(.light)
-                    isInQueue.toggle()
-                    let newValue = isInQueue
-                    enqueueQueueOp(inQueue: newValue)
-                } label: {
-                    HStack(spacing: 6) {
-                        Image(systemName: isInQueue ? "bookmark.fill" : "bookmark")
-                        Text(isInQueue ? "In Queue" : "Add to Queue")
-                            .fontWeight(.semibold)
-                    }
-                    .frame(maxWidth: .infinity)
-                    .frame(height: 50)
-                    .animation(.spring(response: 0.35, dampingFraction: 0.7), value: isInQueue)
-                }
-                .buttonStyle(.bordered)
-                .tint(isInQueue ? .accentColor : .secondary)
-
-                Button {
-                    showHTMLReader = true
-                } label: {
-                    HStack(spacing: 6) {
-                        Image(systemName: "doc.text")
-                        Text("Read")
-                            .fontWeight(.semibold)
-                    }
-                    .frame(maxWidth: .infinity)
-                    .frame(height: 50)
-                }
-                .buttonStyle(.bordered)
-                .tint(.accentColor)
-                .disabled(!canReadHTML)
-            }
-            .listRowInsets(EdgeInsets(top: 12, leading: 16, bottom: 12, trailing: 16))
-
-            if let err = downloadError {
-                Label(err, systemImage: "exclamationmark.triangle.fill")
-                    .font(.subheadline)
-                    .foregroundStyle(.red)
-            }
-        }
     }
 
     // MARK: - Stats section
