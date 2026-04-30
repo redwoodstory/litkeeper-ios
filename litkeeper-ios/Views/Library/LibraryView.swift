@@ -8,6 +8,8 @@ struct LibraryView: View {
     @Environment(\.scenePhase) private var scenePhase
     @Query private var localStories: [LocalStory]
 
+    @AppStorage("showCategoryLabel") private var showCategoryLabel = false
+
     @State private var viewModel = LibraryViewModel()
     @State private var selectedStory: Story? = nil
     @State private var showAddStory = false
@@ -82,7 +84,7 @@ struct LibraryView: View {
                                         token: appState.apiToken,
                                         pangolinTokenId: appState.pangolinTokenId,
                                         pangolinToken: appState.pangolinToken,
-                                        showCategory: viewModel.showCategoryLabel
+                                        showCategory: showCategoryLabel
                                     )
                                 }
                                 .buttonStyle(PressScaleButtonStyle())
@@ -143,7 +145,7 @@ struct LibraryView: View {
                     sortBy: $viewModel.sortBy,
                     sortAscending: $viewModel.sortAscending,
                     showQueueOnly: $viewModel.showQueueOnly,
-                    showCategoryLabel: $viewModel.showCategoryLabel,
+                    showCategoryLabel: $showCategoryLabel,
                     categories: viewModel.availableCategories
                 )
             }

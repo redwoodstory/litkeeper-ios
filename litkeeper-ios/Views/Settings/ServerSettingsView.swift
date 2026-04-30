@@ -14,6 +14,8 @@ struct ServerSettingsView: View {
 
     enum TestResult {
         case success
+        case unauthorized
+        case unreachable
         case failure(String)
     }
 
@@ -27,12 +29,18 @@ struct ServerSettingsView: View {
                         .autocorrectionDisabled()
                         .keyboardType(.URL)
                         .multilineTextAlignment(.trailing)
+                        .onSubmit {
+                            appState.serverURL = urlDraft
+                        }
                 }
                 LabeledContent("API Token") {
                     SecureField("Paste token here", text: $tokenDraft)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
                         .multilineTextAlignment(.trailing)
+                        .onSubmit {
+                            appState.apiToken = tokenDraft
+                        }
                 }
             } header: {
                 Text("Connection")
@@ -47,12 +55,18 @@ struct ServerSettingsView: View {
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
                         .multilineTextAlignment(.trailing)
+                        .onSubmit {
+                            appState.pangolinTokenId = pangolinTokenIdDraft
+                        }
                 }
                 LabeledContent("Token") {
                     SecureField("P-Access-Token value", text: $pangolinTokenDraft)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
                         .multilineTextAlignment(.trailing)
+                        .onSubmit {
+                            appState.pangolinToken = pangolinTokenDraft
+                        }
                 }
             } header: {
                 Text("Pangolin Access Control")
@@ -80,8 +94,14 @@ struct ServerSettingsView: View {
                     case .success:
                         Label("Connected successfully", systemImage: "checkmark.circle.fill")
                             .foregroundStyle(.green)
-                    case .failure:
-                        Label("Unreachable", systemImage: "xmark.circle.fill")
+                    case .unauthorized:
+                        Label("Invalid API token", systemImage: "lock.slash.fill")
+                            .foregroundStyle(.red)
+                    case .unreachable:
+                        Label("Server unreachable", systemImage: "wifi.slash")
+                            .foregroundStyle(.red)
+                    case .failure(let message):
+                        Label(message, systemImage: "xmark.circle.fill")
                             .foregroundStyle(.red)
                     }
                 }
@@ -111,24 +131,20 @@ struct ServerSettingsView: View {
             // library refresh or, worse, briefly clear the displayed library).
             hasAppeared = true
         }
-        .onChange(of: urlDraft) { _, new in
+        .onChange(of: urlDraft) { _, _ in
             guard hasAppeared else { return }
-            appState.serverURL = new
             testResult = nil
         }
-        .onChange(of: tokenDraft) { _, new in
+        .onChange(of: tokenDraft) { _, _ in
             guard hasAppeared else { return }
-            appState.apiToken = new
             testResult = nil
         }
-        .onChange(of: pangolinTokenIdDraft) { _, new in
+        .onChange(of: pangolinTokenIdDraft) { _, _ in
             guard hasAppeared else { return }
-            appState.pangolinTokenId = new
             testResult = nil
         }
-        .onChange(of: pangolinTokenDraft) { _, new in
+        .onChange(of: pangolinTokenDraft) { _, _ in
             guard hasAppeared else { return }
-            appState.pangolinToken = new
             testResult = nil
         }
         .confirmationDialog(
@@ -155,6 +171,11 @@ struct ServerSettingsView: View {
     private func testConnection() {
         isTesting = true
         testResult = nil
+        // Save drafts before testing
+        appState.serverURL = urlDraft
+        appState.apiToken = tokenDraft
+        appState.pangolinTokenId = pangolinTokenIdDraft
+        appState.pangolinToken = pangolinTokenDraft
         let idLen = appState.pangolinTokenId.count
         let tokLen = appState.pangolinToken.count
         print("[LK-Settings] testConnection — pangolinTokenId: \(idLen) chars, pangolinToken: \(tokLen) chars")
@@ -166,9 +187,21 @@ struct ServerSettingsView: View {
                     testResult = .success
                     isTesting = false
                 }
+            } catch let apiError as APIError {
+                await MainActor.run {
+                    switch apiError {
+                    case .unauthorized:
+                        testResult = .unauthorized
+                    case .networkError:
+                        testResult = .unreachable
+                    default:
+                        testResult = .failure(apiError.errorDescription ?? apiError.localizedDescription)
+                    }
+                    isTesting = false
+                }
             } catch {
                 await MainActor.run {
-                    testResult = .failure(error.localizedDescription)
+                    testResult = .unreachable
                     isTesting = false
                 }
             }

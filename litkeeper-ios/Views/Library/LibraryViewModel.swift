@@ -18,7 +18,6 @@ final class LibraryViewModel {
     var sortBy: SortOption = .dateAdded
     var sortAscending = false
     var showQueueOnly = false
-    var showCategoryLabel = false
 
     enum SortOption: String, CaseIterable, Identifiable {
         case dateAdded = "Date Added"
