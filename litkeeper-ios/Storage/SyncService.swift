@@ -30,7 +30,7 @@ final class SyncService {
 
         var pending: [(filename: String, remoteURL: URL)] = []
         for story in stories {
-            let filename = story.cover ?? "\(story.filenameBase).jpg"
+            let filename = story.cover ?? "\(story.id)_\(story.filenameBase).jpg"
             let localURL = DownloadManager.shared.localCoverURL(filename: filename)
 
             if FileManager.default.fileExists(atPath: localURL.path) {
@@ -44,7 +44,7 @@ final class SyncService {
                 }
             }
 
-            guard let remoteURL = URL(string: "\(base)/api/cover/\(filename)") else { continue }
+            guard let remoteURL = URL(string: "\(base)/api/story/\(story.id)/cover") else { continue }
             pending.append((filename, remoteURL))
         }
 
@@ -312,15 +312,16 @@ final class SyncService {
 
     // MARK: - Cover Resync (after metadata change)
 
-    func resyncCover(coverFilename: String, serverURL: String, token: String) async {
+    func resyncCover(storyID: Int, filenameBase: String, serverURL: String, token: String) async {
         guard !serverURL.isEmpty, !token.isEmpty else { return }
 
+        let coverFilename = "\(storyID)_\(filenameBase).jpg"
         let localURL = DownloadManager.shared.localCoverURL(filename: coverFilename)
         try? FileManager.default.removeItem(at: localURL)
         localCoverFilenames.remove(coverFilename)
 
         let base = serverURL.hasSuffix("/") ? String(serverURL.dropLast()) : serverURL
-        guard let remoteURL = URL(string: "\(base)/api/cover/\(coverFilename)") else { return }
+        guard let remoteURL = URL(string: "\(base)/api/story/\(storyID)/cover") else { return }
 
         var request = URLRequest(url: remoteURL)
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")

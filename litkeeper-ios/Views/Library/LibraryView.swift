@@ -201,13 +201,13 @@ struct LibraryView: View {
     }
 
     private func coverURL(for story: Story) -> URL? {
-        let filename = story.cover ?? "\(story.filenameBase).jpg"
+        let filename = story.cover ?? "\(story.id)_\(story.filenameBase).jpg"
         let localURL = DownloadManager.shared.localCoverURL(filename: filename)
         if FileManager.default.fileExists(atPath: localURL.path) {
             return localURL
         }
         guard !appState.serverURL.isEmpty else { return nil }
         let base = appState.serverURL.hasSuffix("/") ? String(appState.serverURL.dropLast()) : appState.serverURL
-        return URL(string: "\(base)/api/cover/\(filename)")
+        return URL(string: "\(base)/api/story/\(story.id)/cover")
     }
 }

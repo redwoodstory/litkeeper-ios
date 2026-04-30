@@ -137,9 +137,9 @@ struct StoryDetailView: View {
                             tags: editableTags
                         )) ?? false
                         if coverRegenerated {
-                            let filename = story.cover ?? "\(story.filenameBase).jpg"
                             await syncService.resyncCover(
-                                coverFilename: filename,
+                                storyID: story.id,
+                                filenameBase: story.filenameBase,
                                 serverURL: appState.serverURL,
                                 token: appState.apiToken
                             )
@@ -432,7 +432,7 @@ struct StoryDetailView: View {
                     } else {
                         // Cover may exist on disk via syncCovers even if coverLocalPath wasn't
                         // recorded (e.g. stories downloaded before the fallback fix).
-                        let fallback = local.coverFilename ?? "\(local.filenameBase).jpg"
+                        let fallback = local.coverFilename ?? "\(local.storyID)_\(local.filenameBase).jpg"
                         let fallbackURL = DownloadManager.shared.coversDirectory.appendingPathComponent(fallback)
                         if FileManager.default.fileExists(atPath: fallbackURL.path) {
                             localFileRow(name: fallback, url: fallbackURL, icon: "photo.fill")
@@ -540,14 +540,14 @@ struct StoryDetailView: View {
     }
 
     private var coverURL: URL? {
-        let filename = story.cover ?? "\(story.filenameBase).jpg"
+        let filename = story.cover ?? "\(story.id)_\(story.filenameBase).jpg"
         let localURL = DownloadManager.shared.localCoverURL(filename: filename)
         if FileManager.default.fileExists(atPath: localURL.path) {
             return localURL
         }
         guard !appState.serverURL.isEmpty else { return nil }
         let base = appState.serverURL.hasSuffix("/") ? String(appState.serverURL.dropLast()) : appState.serverURL
-        return URL(string: "\(base)/api/cover/\(filename)")
+        return URL(string: "\(base)/api/story/\(story.id)/cover")
     }
 
     private func resetProgress() async {

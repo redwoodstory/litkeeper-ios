@@ -32,6 +32,10 @@ final class DownloadManager {
         htmlDirectory.appendingPathComponent("\(storyID)_\(filenameBase).json")
     }
 
+    func localCoverURL(storyID: Int, filenameBase: String) -> URL {
+        coversDirectory.appendingPathComponent("\(storyID)_\(filenameBase).jpg")
+    }
+
     func localCoverURL(filename: String) -> URL {
         coversDirectory.appendingPathComponent(filename)
     }
@@ -90,12 +94,11 @@ final class DownloadManager {
             onProgress(0.85, "HTML saved")
         }
 
-        // 3. Cover — use story.cover if set, fall back to filenameBase.jpg (same
-        //    logic as coverURL and syncCovers so all three paths stay consistent).
-        let coverFilename = story.cover ?? "\(story.filenameBase).jpg"
+        // 3. Cover — always use the deterministic ID-prefixed filename.
+        let coverFilename = "\(story.id)_\(story.filenameBase).jpg"
         onProgress(0.85, "Downloading cover…")
-        let coverRemoteURL = base.appendingPathComponent("api/cover/\(coverFilename)")
-        let coverDest = localCoverURL(filename: coverFilename)
+        let coverRemoteURL = base.appendingPathComponent("api/story/\(story.id)/cover")
+        let coverDest = localCoverURL(storyID: story.id, filenameBase: story.filenameBase)
         try? await downloadFile(from: coverRemoteURL, token: token, pangolinTokenId: pangolinTokenId, pangolinToken: pangolinToken, to: coverDest)
         coverPath = coverFilename
 
@@ -200,6 +203,15 @@ final class DownloadManager {
                !FileManager.default.fileExists(atPath: newHTML.path) {
                 try? FileManager.default.moveItem(at: oldHTML, to: newHTML)
                 record.htmlLocalPath = "\(sid)_\(base).json"
+                changed = true
+            }
+
+            let oldCover = coversDirectory.appendingPathComponent("\(base).jpg")
+            let newCover = coversDirectory.appendingPathComponent("\(sid)_\(base).jpg")
+            if FileManager.default.fileExists(atPath: oldCover.path),
+               !FileManager.default.fileExists(atPath: newCover.path) {
+                try? FileManager.default.moveItem(at: oldCover, to: newCover)
+                record.coverLocalPath = "\(sid)_\(base).jpg"
                 changed = true
             }
         }

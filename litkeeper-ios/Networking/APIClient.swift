@@ -154,8 +154,8 @@ actor APIClient {
 
     // MARK: - Cover Image URL
 
-    func coverURL(filename: String) -> URL {
-        baseURL.appendingPathComponent("api/cover/\(filename)")
+    func coverURL(storyID: Int) -> URL {
+        baseURL.appendingPathComponent("api/story/\(storyID)/cover")
     }
 
     // MARK: - Download URLs (for DownloadManager)
@@ -168,8 +168,8 @@ actor APIClient {
         baseURL.appendingPathComponent("download/html/\(filename)")
     }
 
-    func coverDownloadURL(filename: String) -> URL {
-        baseURL.appendingPathComponent("api/cover/\(filename)")
+    func coverDownloadURL(storyID: Int) -> URL {
+        baseURL.appendingPathComponent("api/story/\(storyID)/cover")
     }
 
     // MARK: - Highlights
