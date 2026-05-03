@@ -38,6 +38,60 @@ struct Story: Identifiable, Codable, Hashable {
         case updatedAt = "updated_at"
     }
 
+    init(id: Int, title: String, author: String, authorURL: String? = nil, category: String? = nil,
+         tags: [String], cover: String? = nil, filenameBase: String, formats: [String],
+         sourceURL: String? = nil, wordCount: Int? = nil, chapterCount: Int? = nil,
+         pageCount: Int? = nil, size: Int? = nil, rating: Int? = nil, inQueue: Bool,
+         queuedAt: String? = nil, lastOpenedAt: String? = nil, description: String? = nil,
+         dateAdded: String? = nil, updatedAt: String? = nil) {
+        self.id           = id
+        self.title        = title
+        self.author       = author
+        self.authorURL    = authorURL
+        self.category     = category
+        self.tags         = tags
+        self.cover        = cover
+        self.filenameBase = filenameBase
+        self.formats      = formats
+        self.sourceURL    = sourceURL
+        self.wordCount    = wordCount
+        self.chapterCount = chapterCount
+        self.pageCount    = pageCount
+        self.size         = size
+        self.rating       = rating
+        self.inQueue      = inQueue
+        self.queuedAt     = queuedAt
+        self.lastOpenedAt = lastOpenedAt
+        self.description  = description
+        self.dateAdded    = dateAdded
+        self.updatedAt    = updatedAt
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id           = try c.decode(Int.self,     forKey: .id)
+        title        = try c.decode(String.self,  forKey: .title).decodingHTMLEntities()
+        author       = try c.decode(String.self,  forKey: .author).decodingHTMLEntities()
+        authorURL    = try c.decodeIfPresent(String.self,   forKey: .authorURL)
+        category     = try c.decodeIfPresent(String.self,   forKey: .category)
+        tags         = try c.decode([String].self,           forKey: .tags)
+        cover        = try c.decodeIfPresent(String.self,   forKey: .cover)
+        filenameBase = try c.decode(String.self,  forKey: .filenameBase)
+        formats      = try c.decode([String].self,           forKey: .formats)
+        sourceURL    = try c.decodeIfPresent(String.self,   forKey: .sourceURL)
+        wordCount    = try c.decodeIfPresent(Int.self,      forKey: .wordCount)
+        chapterCount = try c.decodeIfPresent(Int.self,      forKey: .chapterCount)
+        pageCount    = try c.decodeIfPresent(Int.self,      forKey: .pageCount)
+        size         = try c.decodeIfPresent(Int.self,      forKey: .size)
+        rating       = try c.decodeIfPresent(Int.self,      forKey: .rating)
+        inQueue      = try c.decode(Bool.self,    forKey: .inQueue)
+        queuedAt     = try c.decodeIfPresent(String.self,   forKey: .queuedAt)
+        lastOpenedAt = try c.decodeIfPresent(String.self,   forKey: .lastOpenedAt)
+        description  = try c.decodeIfPresent(String.self,   forKey: .description)
+        dateAdded    = try c.decodeIfPresent(String.self,   forKey: .dateAdded)
+        updatedAt    = try c.decodeIfPresent(String.self,   forKey: .updatedAt)
+    }
+
     // Computed helpers
     var hasEPUB: Bool { formats.contains("epub") }
     // Server stores this format as "json" (the file is a JSON document rendered to HTML for reading)

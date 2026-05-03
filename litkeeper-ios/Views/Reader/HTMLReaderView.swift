@@ -922,14 +922,7 @@ private func appendRun(_ text: String, bold: Bool, italic: Bool, underline: Bool
 }
 
 private func decodeHTMLEntities(_ text: String) -> String {
-    text
-        .replacingOccurrences(of: "&amp;",  with: "&")
-        .replacingOccurrences(of: "&lt;",   with: "<")
-        .replacingOccurrences(of: "&gt;",   with: ">")
-        .replacingOccurrences(of: "&quot;", with: "\"")
-        .replacingOccurrences(of: "&#39;",  with: "'")
-        .replacingOccurrences(of: "&apos;", with: "'")
-        .replacingOccurrences(of: "&nbsp;", with: "\u{00A0}")
+    text.decodingHTMLEntities()
 }
 
 // MARK: - Settings sheet

@@ -17,20 +17,6 @@ struct StoryCard: View {
                 .aspectRatio(2/3, contentMode: .fit)
                 .clipShape(RoundedRectangle(cornerRadius: 8))
                 .shadow(color: .black.opacity(0.2), radius: 4, x: 0, y: 2)
-                .overlay(alignment: .topTrailing) {
-                    HStack(spacing: 4) {
-                        if isDownloaded {
-                            badge("checkmark.circle.fill", color: .green)
-                        }
-                        if isInQueue {
-                            badge("bookmark.fill", color: .blue)
-                        }
-                        if isFavorited {
-                            badge("heart.fill", color: .pink)
-                        }
-                    }
-                    .padding(5)
-                }
 
             if showCategory, let category = story.category {
                 Text(category)
@@ -52,14 +38,6 @@ struct StoryCard: View {
             }
             .frame(maxWidth: .infinity, alignment: .center)
         }
-    }
-
-    private func badge(_ systemName: String, color: Color) -> some View {
-        Image(systemName: systemName)
-            .font(.system(size: 9, weight: .semibold))
-            .foregroundStyle(color)
-            .padding(5)
-            .background(Circle().fill(.white.opacity(0.92)))
     }
 
 }
