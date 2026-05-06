@@ -25,6 +25,11 @@
 		<string>_http._tcp</string>
 		<string>_https._tcp</string>
 	</array>
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsLocalNetworking</key>
+		<true/>
+	</dict>
 	<key>NSFaceIDUsageDescription</key>
 	<string>LitKeeper uses Face ID to keep your library private.</string>
 	<key>NSLocalNetworkUsageDescription</key>

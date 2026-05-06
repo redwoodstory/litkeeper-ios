@@ -6,18 +6,29 @@ struct QueueItem: Identifiable, Codable, Equatable {
     var status: QueueStatus
     var title: String?
     var author: String?
+    var jobType: String?
     var totalPages: Int?
     var downloadedPages: Int?
     var errorMessage: String?
     var createdAt: String?
     var completedAt: String?
 
-    enum QueueStatus: String, Codable {
+    enum QueueStatus: String, Codable, Equatable {
         case pending, processing, completed, failed
+        case rateLimited = "rate_limited"
+        case skipped
+        case unknown
+
+        init(from decoder: Decoder) throws {
+            let container = try decoder.singleValueContainer()
+            let value = try container.decode(String.self)
+            self = QueueStatus(rawValue: value) ?? .unknown
+        }
     }
 
     enum CodingKeys: String, CodingKey {
         case id, url, status, title, author
+        case jobType = "job_type"
         case totalPages = "total_pages"
         case downloadedPages = "downloaded_pages"
         case errorMessage = "error_message"

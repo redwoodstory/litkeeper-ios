@@ -12,7 +12,16 @@ actor APIClient {
         let cleaned = baseURLString.hasSuffix("/")
             ? String(baseURLString.dropLast())
             : baseURLString
-        self.baseURL = URL(string: cleaned) ?? URL(string: "http://localhost:5017")!
+        // Prepend https:// when no scheme is provided (e.g. user typed "myserver.local:5017")
+        let schemed: String
+        if cleaned.hasPrefix("http://") || cleaned.hasPrefix("https://") {
+            schemed = cleaned
+        } else if cleaned.isEmpty {
+            schemed = cleaned
+        } else {
+            schemed = "https://" + cleaned
+        }
+        self.baseURL = URL(string: schemed) ?? URL(string: "https://localhost:5017")!
         self.token = token
         self.pangolinTokenId = pangolinTokenId
         self.pangolinToken = pangolinToken
@@ -191,6 +200,152 @@ actor APIClient {
 
     func deleteHighlight(id: Int) async throws {
         _ = try await delete("/api/highlights/\(id)")
+    }
+
+    // MARK: - Authors
+
+    func fetchAuthors() async throws -> [Author] {
+        let data = try await get("/api/authors")
+        return try decode(AuthorsResponse.self, from: data).authors
+    }
+
+    func queueAuthorDownload(authorURL: String) async throws -> QueueItem {
+        let data = try await post("/api/queue/author", body: ["author_url": authorURL])
+        struct Resp: Codable {
+            let queueItem: QueueItem?
+            let success: Bool?
+            let message: String?
+            enum CodingKeys: String, CodingKey {
+                case queueItem = "queue_item"
+                case success, message
+            }
+        }
+        let resp = try decode(Resp.self, from: data)
+        guard let item = resp.queueItem else { throw APIError.serverError(0) }
+        return item
+    }
+
+    func toggleAuthorWatch(authorID: Int) async throws -> Bool {
+        let data = try await post("/api/authors/\(authorID)/toggle-watch", body: [:])
+        struct Resp: Codable {
+            let watchEnabled: Bool
+            enum CodingKeys: String, CodingKey { case watchEnabled = "watch_enabled" }
+        }
+        return try decode(Resp.self, from: data).watchEnabled
+    }
+
+    func rescanAuthor(authorID: Int) async throws {
+        _ = try await post("/api/authors/\(authorID)/rescan", body: [:])
+    }
+
+    // MARK: - Server Settings
+
+    func fetchAutoUpdateEnabled() async throws -> Bool {
+        let data = try await get("/api/settings/auto-update-enabled")
+        struct Resp: Codable { let enabled: Bool }
+        return try decode(Resp.self, from: data).enabled
+    }
+
+    func setAutoUpdateEnabled(_ enabled: Bool) async throws -> Bool {
+        let data = try await post("/api/settings/toggle-auto-update", body: ["enabled": enabled])
+        struct Resp: Codable { let enabled: Bool }
+        return try decode(Resp.self, from: data).enabled
+    }
+
+    func fetchAutoWatchEnabled() async throws -> Bool {
+        let data = try await get("/api/settings/auto-watch-enabled")
+        struct Resp: Codable { let enabled: Bool }
+        return try decode(Resp.self, from: data).enabled
+    }
+
+    func setAutoWatchEnabled(_ enabled: Bool) async throws -> Bool {
+        let data = try await post("/api/settings/toggle-auto-watch", body: ["enabled": enabled])
+        struct Resp: Codable { let enabled: Bool }
+        return try decode(Resp.self, from: data).enabled
+    }
+
+    func toggleStoryAutoUpdate(storyID: Int) async throws -> Bool {
+        let data = try await post("/api/story/\(storyID)/toggle-auto-update", body: [:])
+        struct Resp: Codable {
+            let autoUpdateEnabled: Bool
+            enum CodingKeys: String, CodingKey { case autoUpdateEnabled = "auto_update_enabled" }
+        }
+        return try decode(Resp.self, from: data).autoUpdateEnabled
+    }
+
+    // MARK: - Metadata / Link Story
+
+    struct MetadataSearchResult: Codable, Identifiable {
+        var id: String { url }
+        let title: String
+        let author: String
+        let url: String
+        let confidence: Double
+        let category: String?
+    }
+
+    struct MetadataSearchResponse: Codable {
+        let success: Bool
+        let results: [MetadataSearchResult]?
+        let bestMatch: MetadataSearchResult?
+        let autoMatch: Bool?
+        let message: String?
+        enum CodingKeys: String, CodingKey {
+            case success, results, message
+            case bestMatch = "best_match"
+            case autoMatch = "auto_match"
+        }
+    }
+
+    func searchStoryMetadata(storyID: Int) async throws -> MetadataSearchResponse {
+        let data = try await post("/api/metadata/search/\(storyID)", body: [:])
+        return try decode(MetadataSearchResponse.self, from: data)
+    }
+
+    func refreshStoryMetadata(storyID: Int, url: String, method: String) async throws -> Story {
+        let data = try await post("/api/metadata/refresh/\(storyID)", body: ["url": url, "method": method])
+        struct Resp: Codable {
+            let success: Bool
+            let story: Story
+            let message: String?
+        }
+        let resp = try decode(Resp.self, from: data)
+        guard resp.success else {
+            throw APIError.serverError(0)
+        }
+        return resp.story
+    }
+
+    // MARK: - Excluded Stories
+
+    func fetchExcludedStories() async throws -> [Story] {
+        let data = try await get("/api/stories/excluded")
+        struct Response: Codable {
+            let success: Bool
+            let stories: [Story]
+        }
+        let response = try decode(Response.self, from: data)
+        return response.stories
+    }
+
+    func resetAllExclusions() async throws -> Int {
+        let data = try await post("/api/stories/excluded/reset", body: [:])
+        struct Response: Codable {
+            let success: Bool
+            let count: Int
+        }
+        let response = try decode(Response.self, from: data)
+        return response.count
+    }
+
+    func toggleStoryExclusion(storyID: Int, excluded: Bool) async throws -> Story {
+        let data = try await post("/api/story/\(storyID)/toggle-exclusion", body: ["excluded": excluded])
+        struct Response: Codable {
+            let success: Bool
+            let story: Story
+        }
+        let response = try decode(Response.self, from: data)
+        return response.story
     }
 
     // MARK: - Connection Test

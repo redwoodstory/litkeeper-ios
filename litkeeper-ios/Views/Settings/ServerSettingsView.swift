@@ -192,8 +192,14 @@ struct ServerSettingsView: View {
                     switch apiError {
                     case .unauthorized:
                         testResult = .unauthorized
-                    case .networkError:
-                        testResult = .unreachable
+                    case .networkError(let underlying):
+                        let detail: String
+                        if let urlErr = underlying as? URLError {
+                            detail = urlErr.localizedDescription
+                        } else {
+                            detail = underlying.localizedDescription
+                        }
+                        testResult = .failure("Server unreachable — \(detail)")
                     default:
                         testResult = .failure(apiError.errorDescription ?? apiError.localizedDescription)
                     }
@@ -201,7 +207,7 @@ struct ServerSettingsView: View {
                 }
             } catch {
                 await MainActor.run {
-                    testResult = .unreachable
+                    testResult = .failure("Unexpected error: \(error.localizedDescription)")
                     isTesting = false
                 }
             }

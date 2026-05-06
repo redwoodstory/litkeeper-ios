@@ -8,6 +8,9 @@ struct SettingsView: View {
 
     @State private var showClearConfirm = false
     @State private var storageUsed: String = ""
+    @State private var autoUpdateEnabled = false
+    @State private var autoWatchEnabled = false
+    @State private var hasLoadedServerSettings = false
 
     enum ConnectionStatus { case unknown, checking, reachable, unreachable }
 
@@ -23,6 +26,42 @@ struct SettingsView: View {
                     }
                     LabeledContent("Status") {
                         statusLabel
+                    }
+                }
+
+                if appState.isConfigured {
+                    Section {
+                        Toggle("Enable Auto-Update", isOn: $autoUpdateEnabled)
+                            .onChange(of: autoUpdateEnabled) { _, newValue in
+                                guard hasLoadedServerSettings else { return }
+                                saveAutoUpdate(newValue)
+                            }
+                        NavigationLink("Manage Stories") {
+                            StoryAutoUpdateView()
+                        }
+                        .disabled(!autoUpdateEnabled)
+                    } header: {
+                        Text("Auto-Update Stories")
+                    } footer: {
+                        Text("Stories are checked for new chapters when the automation runs. Settings are stored on your server.")
+                            .font(.caption)
+                    }
+
+                    Section {
+                        Toggle("Auto-Download New Stories", isOn: $autoWatchEnabled)
+                            .onChange(of: autoWatchEnabled) { _, newValue in
+                                guard hasLoadedServerSettings else { return }
+                                saveAutoWatch(newValue)
+                            }
+                        NavigationLink("Manage Authors") {
+                            AuthorsView()
+                        }
+                        .disabled(!autoWatchEnabled)
+                    } header: {
+                        Text("Watched Authors")
+                    } footer: {
+                        Text("Watched authors are checked for new stories on the same schedule.")
+                            .font(.caption)
                     }
                 }
 
@@ -53,9 +92,16 @@ struct SettingsView: View {
             .onAppear {
                 refreshStorageUsed()
                 checkConnection()
+                loadServerSettings()
             }
-            .onChange(of: appState.isConfigured) { _, _ in
+            .onChange(of: appState.isConfigured) { _, isConfigured in
                 checkConnection()
+                if isConfigured {
+                    hasLoadedServerSettings = false
+                    loadServerSettings()
+                } else {
+                    hasLoadedServerSettings = false
+                }
             }
             .confirmationDialog(
                 "Clear all downloaded stories?",
@@ -124,6 +170,31 @@ struct SettingsView: View {
         } else {
             storageUsed = String(format: "%.1f MB", Double(bytes) / (1024 * 1024))
         }
+    }
+
+    private func loadServerSettings() {
+        guard appState.isConfigured else { return }
+        let client = appState.makeAPIClient()
+        Task {
+            async let autoUpdate = try? client.fetchAutoUpdateEnabled()
+            async let autoWatch = try? client.fetchAutoWatchEnabled()
+            let (update, watch) = await (autoUpdate, autoWatch)
+            await MainActor.run {
+                if let update { autoUpdateEnabled = update }
+                if let watch { autoWatchEnabled = watch }
+                hasLoadedServerSettings = true
+            }
+        }
+    }
+
+    private func saveAutoUpdate(_ enabled: Bool) {
+        let client = appState.makeAPIClient()
+        Task { try? await client.setAutoUpdateEnabled(enabled) }
+    }
+
+    private func saveAutoWatch(_ enabled: Bool) {
+        let client = appState.makeAPIClient()
+        Task { try? await client.setAutoWatchEnabled(enabled) }
     }
 
     private func clearAllDownloads() {

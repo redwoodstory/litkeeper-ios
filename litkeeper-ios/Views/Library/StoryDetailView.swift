@@ -25,6 +25,8 @@ struct StoryDetailView: View {
     @State private var showEditStory = false
     @State private var safariURL: URL? = nil
     @State private var localFilesExpanded = false
+    @State private var autoUpdateEnabled: Bool = true
+    @State private var isTogglingAutoUpdate = false
 
     private var localStory: LocalStory? {
         // First try exact match by storyID + filenameBase
@@ -156,6 +158,7 @@ struct StoryDetailView: View {
             editableCategory = story.category ?? ""
             editableDescription = story.description ?? ""
             editableTags = story.tags
+            autoUpdateEnabled = story.autoUpdateEnabled
         }
     }
 
@@ -261,6 +264,20 @@ struct StoryDetailView: View {
                             .animation(.spring(response: 0.35, dampingFraction: 0.7), value: isInQueue)
                     }
                     .buttonStyle(.plain)
+
+                    if !story.autoRefreshExcluded {
+                        Button {
+                            Task { await toggleAutoUpdate() }
+                        } label: {
+                            Image(systemName: autoUpdateEnabled ? "arrow.clockwise.circle.fill" : "arrow.clockwise.circle")
+                                .font(.title)
+                                .foregroundStyle(autoUpdateEnabled ? Color.accentColor : Color.secondary)
+                                .frame(width: 44, height: 44)
+                                .animation(.spring(response: 0.35, dampingFraction: 0.7), value: autoUpdateEnabled)
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(isTogglingAutoUpdate)
+                    }
                 }
                 .padding(.top, 10)
 
@@ -559,6 +576,22 @@ struct StoryDetailView: View {
         try? modelContext.save()
         let zeroed = ReadingProgress(currentChapter: nil, cfi: nil, percentage: 0, isCompleted: false, lastReadAt: nil)
         try? await appState.makeAPIClient().saveProgress(storyID: story.id, progress: zeroed)
+    }
+
+    private func toggleAutoUpdate() async {
+        isTogglingAutoUpdate = true
+        do {
+            let newValue = try await appState.makeAPIClient().toggleStoryAutoUpdate(storyID: story.id)
+            await MainActor.run {
+                autoUpdateEnabled = newValue
+                HapticManager.shared.notify(.success)
+            }
+        } catch {
+            await MainActor.run {
+                HapticManager.shared.notify(.error)
+            }
+        }
+        isTogglingAutoUpdate = false
     }
 
     private func startDownload() {

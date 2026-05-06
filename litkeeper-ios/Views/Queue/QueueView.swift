@@ -158,6 +158,13 @@ struct QueueItemRow: View {
         case .failed:
             Image(systemName: "xmark.circle.fill")
                 .foregroundStyle(.red)
+        case .rateLimited:
+            Label("Rate Limited", systemImage: "clock.badge.exclamationmark")
+                .labelStyle(.iconOnly)
+                .foregroundStyle(.orange)
+        case .skipped, .unknown:
+            Image(systemName: "minus.circle")
+                .foregroundStyle(.secondary)
         }
     }
 }

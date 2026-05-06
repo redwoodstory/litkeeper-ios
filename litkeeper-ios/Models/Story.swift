@@ -22,6 +22,10 @@ struct Story: Identifiable, Codable, Hashable {
     var description: String?
     var dateAdded: String?
     var updatedAt: String?
+    var autoUpdateEnabled: Bool
+    var autoRefreshExcluded: Bool
+    var autoRefreshExclusionReason: String?
+    var autoRefreshExclusionType: String?
 
     enum CodingKeys: String, CodingKey {
         case id, title, author, category, tags, cover, formats, description, rating, size
@@ -36,6 +40,10 @@ struct Story: Identifiable, Codable, Hashable {
         case lastOpenedAt = "last_opened_at"
         case dateAdded = "date_added"
         case updatedAt = "updated_at"
+        case autoUpdateEnabled = "auto_update_enabled"
+        case autoRefreshExcluded = "auto_refresh_excluded"
+        case autoRefreshExclusionReason = "auto_refresh_exclusion_reason"
+        case autoRefreshExclusionType = "auto_refresh_exclusion_type"
     }
 
     init(id: Int, title: String, author: String, authorURL: String? = nil, category: String? = nil,
@@ -43,7 +51,11 @@ struct Story: Identifiable, Codable, Hashable {
          sourceURL: String? = nil, wordCount: Int? = nil, chapterCount: Int? = nil,
          pageCount: Int? = nil, size: Int? = nil, rating: Int? = nil, inQueue: Bool,
          queuedAt: String? = nil, lastOpenedAt: String? = nil, description: String? = nil,
-         dateAdded: String? = nil, updatedAt: String? = nil) {
+         dateAdded: String? = nil, updatedAt: String? = nil,
+         autoUpdateEnabled: Bool = true,
+         autoRefreshExcluded: Bool = false,
+         autoRefreshExclusionReason: String? = nil,
+         autoRefreshExclusionType: String? = nil) {
         self.id           = id
         self.title        = title
         self.author       = author
@@ -65,6 +77,10 @@ struct Story: Identifiable, Codable, Hashable {
         self.description  = description
         self.dateAdded    = dateAdded
         self.updatedAt    = updatedAt
+        self.autoUpdateEnabled = autoUpdateEnabled
+        self.autoRefreshExcluded = autoRefreshExcluded
+        self.autoRefreshExclusionReason = autoRefreshExclusionReason
+        self.autoRefreshExclusionType = autoRefreshExclusionType
     }
 
     init(from decoder: Decoder) throws {
@@ -90,6 +106,10 @@ struct Story: Identifiable, Codable, Hashable {
         description  = try c.decodeIfPresent(String.self,   forKey: .description)
         dateAdded    = try c.decodeIfPresent(String.self,   forKey: .dateAdded)
         updatedAt    = try c.decodeIfPresent(String.self,   forKey: .updatedAt)
+        autoUpdateEnabled = try c.decodeIfPresent(Bool.self, forKey: .autoUpdateEnabled) ?? true
+        autoRefreshExcluded = try c.decodeIfPresent(Bool.self, forKey: .autoRefreshExcluded) ?? false
+        autoRefreshExclusionReason = try c.decodeIfPresent(String.self, forKey: .autoRefreshExclusionReason)
+        autoRefreshExclusionType = try c.decodeIfPresent(String.self, forKey: .autoRefreshExclusionType)
     }
 
     // Computed helpers

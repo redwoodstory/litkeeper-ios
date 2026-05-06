@@ -18,8 +18,10 @@ final class QueueViewModel {
         async let itemsFetch = client.fetchQueueItems()
         async let statsFetch = client.fetchQueueStats()
         do {
-            let (newItems, newStats) = try await (itemsFetch, statsFetch)
-            items = newItems
+            let (fetchedItems, newStats) = try await (itemsFetch, statsFetch)
+            items = fetchedItems.filter { item in
+                !(item.jobType == "author" && item.status == .completed)
+            }
             stats = newStats
         } catch let error as APIError {
             if case .networkError = error { /* transient — never alert */ }
