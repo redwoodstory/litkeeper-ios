@@ -39,7 +39,8 @@ struct ReadingQueueView: View {
                                     coverURL: coverURL(for: story),
                                     fallbackURL: DownloadManager.shared.remoteCoverURL(storyID: story.id, serverURL: appState.serverURL),
                                     token: appState.apiToken,
-                                    proxyAuthToken: appState.proxyAuthToken
+                                    proxyTokenId: appState.proxyTokenId,
+                                    proxyToken: appState.proxyToken
                                 )
                                 .contentShape(Rectangle())
                             }

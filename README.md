@@ -30,31 +30,27 @@ Tap **Test Connection** to verify. The token is stored in the device Keychain.
 
 ## Accessing from Outside Your LAN
 
-The app supports an optional proxy token for reverse proxies that gate access to your LitKeeper server. Enter the token value under **Settings → Server → Proxy Authentication**.
+The app supports optional proxy credentials for reverse proxies that gate access to your LitKeeper server. Enter them under **Settings → Server → Proxy Authentication**.
 
-The app sends this value as the `X-Auth-Token` header on every request alongside your LitKeeper API token (sent as `X-Api-Key`). Leave the field blank for direct LAN access — the header is omitted when empty.
-
-> Both tokens are required for external access: the proxy token authenticates at the network edge; the API token authenticates to the LitKeeper server itself.
+The proxy credentials and the LitKeeper API token serve different purposes: the proxy credentials authenticate at the network edge; the API token authenticates to the LitKeeper server itself. Both are required for external access; leave the proxy fields blank for direct LAN access.
 
 ### Pangolin Setup
 
-If you're using [Pangolin](https://docs.pangolin.net) as your tunnel/reverse proxy, configure **Header Authentication** on your resource as follows:
+If you're using [Pangolin](https://docs.pangolin.net) as your tunnel/reverse proxy, use a **Share Link** to authenticate the iOS app:
 
-| Field | Value |
-|-------|-------|
-| Header Name | `X-Auth-Token` |
-| Expected Value | any secret string you choose (e.g. a UUID) |
-| Force 401 Unauthorized | **Enabled** |
+1. In the Pangolin admin panel, open your resource and go to **Share Links**
+2. Create a new share link — copy the **Token ID** and **Token Secret**
+3. In the iOS app under **Settings → Server → Proxy Authentication**, enter:
+   - **Access Token ID** — the Token ID (e.g. `bu8ji397`)
+   - **Access Token Secret** — the Token Secret
 
-Enabling "Force 401" is required for API clients. Without it, Pangolin responds to unauthenticated requests with a browser redirect instead of a 401, which breaks non-browser clients.
-
-Enter the same secret string in the app under **Settings → Server → Proxy Authentication Token**.
+The app sends these as `P-Access-Token-Id` and `P-Access-Token` headers on every request. No browser login or session management required.
 
 ## Security
 
 **Biometric Lock** — enable under **Settings → Security** to lock the app whenever it moves to the background. Face ID or Touch ID is used to unlock.
 
-The app does not participate in the server's PIN lock system. The server PIN lock applies only to browser sessions; API requests (which the app uses) bypass it automatically.
+The app does not participate in the server's PIN lock system. The server PIN lock applies only to browser sessions; API requests (authenticated via `X-Api-Key`) bypass it automatically.
 
 ## Local Storage
 

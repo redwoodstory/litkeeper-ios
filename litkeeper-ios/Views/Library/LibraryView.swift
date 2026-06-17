@@ -83,7 +83,8 @@ struct LibraryView: View {
                                         coverURL: coverURL(for: story),
                                         fallbackURL: DownloadManager.shared.remoteCoverURL(storyID: story.id, serverURL: appState.serverURL),
                                         token: appState.apiToken,
-                                        proxyAuthToken: appState.proxyAuthToken,
+                                        proxyTokenId: appState.proxyTokenId,
+                                        proxyToken: appState.proxyToken,
                                         showCategory: showCategoryLabel
                                     )
                                 }
@@ -104,8 +105,10 @@ struct LibraryView: View {
                         HapticManager.shared.notify(.success)
                         syncService.syncQueueStatus(for: viewModel.stories, modelContext: modelContext)
                         cardsAppeared = false
-                        Task { await syncService.syncCovers(for: viewModel.stories, serverURL: appState.serverURL, token: appState.apiToken, proxyAuthToken: appState.proxyAuthToken, modelContext: modelContext) }
-                        Task { await syncService.syncContent(for: viewModel.stories, serverURL: appState.serverURL, token: appState.apiToken, proxyAuthToken: appState.proxyAuthToken, modelContext: modelContext, localStories: localStories) }
+                        Task { await syncService.syncCovers(for: viewModel.stories, serverURL: appState.serverURL, token: appState.apiToken, proxyTokenId: appState.proxyTokenId,
+                                        proxyToken: appState.proxyToken, modelContext: modelContext) }
+                        Task { await syncService.syncContent(for: viewModel.stories, serverURL: appState.serverURL, token: appState.apiToken, proxyTokenId: appState.proxyTokenId,
+                                        proxyToken: appState.proxyToken, modelContext: modelContext, localStories: localStories) }
                         Task { await syncService.syncHighlights(appState: appState, modelContext: modelContext) }
                         try? await Task.sleep(for: .milliseconds(50))
                         cardsAppeared = true
@@ -171,8 +174,10 @@ struct LibraryView: View {
             await viewModel.refresh(appState: appState, silent: true)
             syncService.syncQueueStatus(for: viewModel.stories, modelContext: modelContext)
             Task { await syncService.syncMetadata(appState: appState, modelContext: modelContext) }
-            Task { await syncService.syncCovers(for: viewModel.stories, serverURL: appState.serverURL, token: appState.apiToken, proxyAuthToken: appState.proxyAuthToken, modelContext: modelContext) }
-            Task { await syncService.syncContent(for: viewModel.stories, serverURL: appState.serverURL, token: appState.apiToken, proxyAuthToken: appState.proxyAuthToken, modelContext: modelContext, localStories: localStories) }
+            Task { await syncService.syncCovers(for: viewModel.stories, serverURL: appState.serverURL, token: appState.apiToken, proxyTokenId: appState.proxyTokenId,
+                                        proxyToken: appState.proxyToken, modelContext: modelContext) }
+            Task { await syncService.syncContent(for: viewModel.stories, serverURL: appState.serverURL, token: appState.apiToken, proxyTokenId: appState.proxyTokenId,
+                                        proxyToken: appState.proxyToken, modelContext: modelContext, localStories: localStories) }
             Task { await syncService.syncHighlights(appState: appState, modelContext: modelContext) }
         }
         .task {

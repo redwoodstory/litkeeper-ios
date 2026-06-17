@@ -5,7 +5,8 @@ struct ServerSettingsView: View {
 
     @State private var urlDraft: String = ""
     @State private var tokenDraft: String = ""
-    @State private var proxyAuthTokenDraft: String = ""
+    @State private var proxyTokenIdDraft: String = ""
+    @State private var proxyTokenDraft: String = ""
     @State private var testResult: TestResult? = nil
     @State private var isTesting = false
     @State private var showDisconnectConfirm = false
@@ -50,19 +51,28 @@ struct ServerSettingsView: View {
             }
 
             Section {
-                LabeledContent("Proxy Token") {
-                    SecureField("X-Auth-Token value", text: $proxyAuthTokenDraft)
+                LabeledContent("Access Token ID") {
+                    TextField("e.g. bu8ji397", text: $proxyTokenIdDraft)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
                         .multilineTextAlignment(.trailing)
                         .onSubmit {
-                            appState.proxyAuthToken = proxyAuthTokenDraft
+                            appState.proxyTokenId = proxyTokenIdDraft
+                        }
+                }
+                LabeledContent("Access Token Secret") {
+                    SecureField("Token secret", text: $proxyTokenDraft)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .multilineTextAlignment(.trailing)
+                        .onSubmit {
+                            appState.proxyToken = proxyTokenDraft
                         }
                 }
             } header: {
                 Text("Proxy Authentication")
             } footer: {
-                Text("Optional. Required when your server is behind a reverse proxy with header-based access control (e.g. Pangolin, Authelia). The app sends this value as the X-Auth-Token header. Leave blank for direct access.")
+                Text("Optional. Required when your server is behind Pangolin. Create a Share Link for your resource in the Pangolin admin panel and paste the Token ID and Token Secret here. Leave both blank for direct LAN access.")
                     .font(.caption)
             }
 
@@ -117,7 +127,8 @@ struct ServerSettingsView: View {
         .onAppear {
             urlDraft = appState.serverURL
             tokenDraft = appState.apiToken
-            proxyAuthTokenDraft = appState.proxyAuthToken
+            proxyTokenIdDraft = appState.proxyTokenId
+            proxyTokenDraft = appState.proxyToken
             // Mark as appeared AFTER setting drafts so onChange handlers below
             // don't write back to appState during initialization (which would
             // cause isConfigured to flicker false→true and trigger a spurious
@@ -132,7 +143,11 @@ struct ServerSettingsView: View {
             guard hasAppeared else { return }
             testResult = nil
         }
-        .onChange(of: proxyAuthTokenDraft) { _, _ in
+        .onChange(of: proxyTokenIdDraft) { _, _ in
+            guard hasAppeared else { return }
+            testResult = nil
+        }
+        .onChange(of: proxyTokenDraft) { _, _ in
             guard hasAppeared else { return }
             testResult = nil
         }
@@ -144,10 +159,12 @@ struct ServerSettingsView: View {
             Button("Disconnect", role: .destructive) {
                 appState.serverURL = ""
                 appState.apiToken = ""
-                appState.proxyAuthToken = ""
+                appState.proxyTokenId = ""
+                appState.proxyToken = ""
                 urlDraft = ""
                 tokenDraft = ""
-                proxyAuthTokenDraft = ""
+                proxyTokenIdDraft = ""
+                proxyTokenDraft = ""
                 testResult = nil
             }
         } message: {
@@ -161,8 +178,9 @@ struct ServerSettingsView: View {
         // Save drafts before testing
         appState.serverURL = urlDraft
         appState.apiToken = tokenDraft
-        appState.proxyAuthToken = proxyAuthTokenDraft
-        print("[LK-Settings] testConnection — proxyAuthToken: \(appState.proxyAuthToken.count) chars")
+        appState.proxyTokenId = proxyTokenIdDraft
+        appState.proxyToken = proxyTokenDraft
+        print("[LK-Settings] testConnection — proxyTokenId: \(appState.proxyTokenId), proxyToken: \(appState.proxyToken.count) chars")
         let client = appState.makeAPIClient()
         Task {
             do {

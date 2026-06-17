@@ -167,7 +167,7 @@ struct StoryDetailView: View {
     @ViewBuilder
     private var headerSection: some View {
         HStack(alignment: .top, spacing: 16) {
-            CoverImageView(url: coverURL, fallbackURL: DownloadManager.shared.remoteCoverURL(storyID: story.id, serverURL: appState.serverURL), title: editableTitle, author: editableAuthor, token: appState.apiToken, proxyAuthToken: appState.proxyAuthToken)
+            CoverImageView(url: coverURL, fallbackURL: DownloadManager.shared.remoteCoverURL(storyID: story.id, serverURL: appState.serverURL), title: editableTitle, author: editableAuthor, token: appState.apiToken, proxyTokenId: appState.proxyTokenId, proxyToken: appState.proxyToken)
                 .frame(width: 100, height: 150)
                 .clipShape(RoundedRectangle(cornerRadius: 10))
                 .shadow(color: .black.opacity(0.18), radius: 6, x: 0, y: 3)
@@ -598,7 +598,8 @@ struct StoryDetailView: View {
                     story: story,
                     serverBaseURL: appState.serverURL,
                     token: appState.apiToken,
-                    proxyAuthToken: appState.proxyAuthToken,
+                    proxyTokenId: appState.proxyTokenId.isEmpty ? nil : appState.proxyTokenId,
+                    proxyToken: appState.proxyToken.isEmpty ? nil : appState.proxyToken,
                     modelContext: modelContext
                 ) { _, _ in }
             } catch {

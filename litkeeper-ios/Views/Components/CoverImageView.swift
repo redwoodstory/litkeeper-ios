@@ -6,7 +6,8 @@ struct CoverImageView: View {
     let title: String
     let author: String
     var token: String = ""
-    var proxyAuthToken: String = ""
+    var proxyTokenId: String = ""
+    var proxyToken: String = ""
 
     @State private var loadedImage: UIImage? = nil
     @State private var isLoading: Bool = true
@@ -63,9 +64,10 @@ struct CoverImageView: View {
     private func loadRemote(url: URL) async {
         var request = URLRequest(url: url)
         if !token.isEmpty {
-            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+            request.setValue(token, forHTTPHeaderField: "X-Api-Key")
         }
-        if !proxyAuthToken.isEmpty { request.setValue(proxyAuthToken, forHTTPHeaderField: "X-Auth-Token") }
+        if !proxyTokenId.isEmpty { request.setValue(proxyTokenId, forHTTPHeaderField: "P-Access-Token-Id") }
+        if !proxyToken.isEmpty { request.setValue(proxyToken, forHTTPHeaderField: "P-Access-Token") }
         guard let (data, response) = try? await URLSession.shared.data(for: request),
               let http = response as? HTTPURLResponse else {
             print("[LK-IMG] ✗ No response for \(url.lastPathComponent)")

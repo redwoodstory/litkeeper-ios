@@ -9,8 +9,11 @@ final class AppState {
     var apiToken: String {
         didSet { KeychainHelper.write(key: "apiToken", value: apiToken) }
     }
-    var proxyAuthToken: String {
-        didSet { KeychainHelper.write(key: "proxyAuthToken", value: proxyAuthToken) }
+    var proxyTokenId: String {
+        didSet { KeychainHelper.write(key: "proxyTokenId", value: proxyTokenId) }
+    }
+    var proxyToken: String {
+        didSet { KeychainHelper.write(key: "proxyToken", value: proxyToken) }
     }
     var biometricLockEnabled: Bool {
         didSet { UserDefaults.standard.set(biometricLockEnabled, forKey: "biometricLockEnabled") }
@@ -24,15 +27,12 @@ final class AppState {
     init() {
         serverURL = UserDefaults.standard.string(forKey: "serverURL") ?? ""
         apiToken = KeychainHelper.read(key: "apiToken") ?? ""
-        var resolvedProxyToken = KeychainHelper.read(key: "proxyAuthToken") ?? ""
-        if resolvedProxyToken.isEmpty,
-           let legacyTok = KeychainHelper.read(key: "pangolinToken"), !legacyTok.isEmpty {
-            resolvedProxyToken = legacyTok
-            KeychainHelper.write(key: "proxyAuthToken", value: legacyTok)
-        }
+        proxyTokenId = KeychainHelper.read(key: "proxyTokenId") ?? ""
+        proxyToken = KeychainHelper.read(key: "proxyToken") ?? ""
+        // Clean up legacy proxy auth keys
         KeychainHelper.delete(key: "pangolinTokenId")
         KeychainHelper.delete(key: "pangolinToken")
-        proxyAuthToken = resolvedProxyToken
+        KeychainHelper.delete(key: "proxyAuthToken")
         biometricLockEnabled = UserDefaults.standard.bool(forKey: "biometricLockEnabled")
     }
 
@@ -40,7 +40,8 @@ final class AppState {
         APIClient(
             baseURLString: serverURL,
             token: apiToken,
-            proxyAuthToken: proxyAuthToken.isEmpty ? nil : proxyAuthToken
+            proxyTokenId: proxyTokenId.isEmpty ? nil : proxyTokenId,
+            proxyToken: proxyToken.isEmpty ? nil : proxyToken
         )
     }
 

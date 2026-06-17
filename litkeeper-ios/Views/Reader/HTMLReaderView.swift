@@ -793,7 +793,8 @@ struct HTMLReaderView: View {
             ? String(appState.serverURL.dropLast())
             : appState.serverURL
         let apiToken      = appState.apiToken
-        let proxyAuthToken = appState.proxyAuthToken
+        let proxyTokenId  = appState.proxyTokenId
+        let proxyToken    = appState.proxyToken
 
         // ── 1. Load story JSON ────────────────────────────────────────────
         let decoded: StoryContent
@@ -815,10 +816,13 @@ struct HTMLReaderView: View {
             }
             var request = URLRequest(url: url)
             if !apiToken.isEmpty {
-                request.setValue("Bearer \(apiToken)", forHTTPHeaderField: "Authorization")
+                request.setValue(apiToken, forHTTPHeaderField: "X-Api-Key")
             }
-            if !proxyAuthToken.isEmpty {
-                request.setValue(proxyAuthToken, forHTTPHeaderField: "X-Auth-Token")
+            if !proxyTokenId.isEmpty {
+                request.setValue(proxyTokenId, forHTTPHeaderField: "P-Access-Token-Id")
+            }
+            if !proxyToken.isEmpty {
+                request.setValue(proxyToken, forHTTPHeaderField: "P-Access-Token")
             }
             do {
                 let (data, response) = try await URLSession.shared.data(for: request)

@@ -3,10 +3,11 @@ import Foundation
 actor APIClient {
     private let baseURL: URL
     private let token: String
-    private let proxyAuthToken: String?
+    private let proxyTokenId: String?
+    private let proxyToken: String?
     private let session: URLSession
 
-    init(baseURLString: String, token: String, proxyAuthToken: String? = nil) {
+    init(baseURLString: String, token: String, proxyTokenId: String? = nil, proxyToken: String? = nil) {
         // Normalize: strip trailing slash
         let cleaned = baseURLString.hasSuffix("/")
             ? String(baseURLString.dropLast())
@@ -22,7 +23,8 @@ actor APIClient {
         }
         self.baseURL = URL(string: schemed) ?? URL(string: "https://localhost:5017")!
         self.token = token
-        self.proxyAuthToken = proxyAuthToken
+        self.proxyTokenId = proxyTokenId
+        self.proxyToken = proxyToken
         let config = URLSessionConfiguration.ephemeral
         config.timeoutIntervalForRequest = 30
         self.session = URLSession(configuration: config)
@@ -435,8 +437,9 @@ actor APIClient {
         req.httpMethod = method
         req.setValue(token, forHTTPHeaderField: "X-Api-Key")
         req.setValue("application/json", forHTTPHeaderField: "Accept")
-        if let tok = proxyAuthToken {
-            req.setValue(tok, forHTTPHeaderField: "X-Auth-Token")
+        if let tokenId = proxyTokenId, let tok = proxyToken {
+            req.setValue(tokenId, forHTTPHeaderField: "P-Access-Token-Id")
+            req.setValue(tok, forHTTPHeaderField: "P-Access-Token")
         }
         return req
     }
@@ -487,10 +490,10 @@ actor APIClient {
         let start = Date()
 
         print("[LK-API] → \(method) \(fullURL)")
-        if let tok = proxyAuthToken {
-            print("[LK-API]   Proxy Basic Auth: X-Auth-Token:…\(tok.suffix(4)) (\(tok.count) chars)")
+        if let tokenId = proxyTokenId, let tok = proxyToken {
+            print("[LK-API]   P-Access-Token-Id: \(tokenId) / P-Access-Token: …\(tok.suffix(4)) (\(tok.count) chars)")
         } else {
-            print("[LK-API]   Proxy Basic Auth: (not configured)")
+            print("[LK-API]   P-Access-Token: (not configured)")
         }
 
         // Preserve auth headers across redirects — URLSession strips custom headers by default,
@@ -499,7 +502,10 @@ actor APIClient {
             "X-Api-Key": token,
             "Accept": "application/json"
         ]
-        if let tok = proxyAuthToken { authHeaders["X-Auth-Token"] = tok }
+        if let tokenId = proxyTokenId, let tok = proxyToken {
+            authHeaders["P-Access-Token-Id"] = tokenId
+            authHeaders["P-Access-Token"] = tok
+        }
         let redirectDelegate = HeaderPreservingDelegate(headers: authHeaders)
 
         do {

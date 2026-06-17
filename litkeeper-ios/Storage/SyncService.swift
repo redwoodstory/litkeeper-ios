@@ -22,7 +22,7 @@ final class SyncService {
 
     // MARK: - Cover Sync
 
-    func syncCovers(for stories: [Story], serverURL: String, token: String, proxyAuthToken: String? = nil, modelContext: ModelContext) async {
+    func syncCovers(for stories: [Story], serverURL: String, token: String, proxyTokenId: String? = nil, proxyToken: String? = nil, modelContext: ModelContext) async {
         guard !serverURL.isEmpty, !token.isEmpty, !isSyncingCovers else { return }
         isSyncingCovers = true
         defer { isSyncingCovers = false }
@@ -62,11 +62,13 @@ final class SyncService {
                     let capturedFilename = item.filename
                     let capturedURL = item.remoteURL
                     let capturedToken = token
-                    let capturedProxyToken = proxyAuthToken
+                    let capturedProxyTokenId = proxyTokenId
+                    let capturedProxyToken = proxyToken
                     group.addTask {
                         var request = URLRequest(url: capturedURL)
-                        request.setValue("Bearer \(capturedToken)", forHTTPHeaderField: "Authorization")
-                        if let tok = capturedProxyToken { request.setValue(tok, forHTTPHeaderField: "X-Auth-Token") }
+                        request.setValue(capturedToken, forHTTPHeaderField: "X-Api-Key")
+                        if let tokenId = capturedProxyTokenId { request.setValue(tokenId, forHTTPHeaderField: "P-Access-Token-Id") }
+                        if let tok = capturedProxyToken { request.setValue(tok, forHTTPHeaderField: "P-Access-Token") }
                         guard let (data, response) = try? await URLSession.shared.data(for: request),
                               let http = response as? HTTPURLResponse,
                               http.statusCode == 200,
@@ -98,7 +100,8 @@ final class SyncService {
         for stories: [Story],
         serverURL: String,
         token: String,
-        proxyAuthToken: String? = nil,
+        proxyTokenId: String? = nil,
+        proxyToken: String? = nil,
         modelContext: ModelContext,
         localStories: [LocalStory]
     ) async {
@@ -119,8 +122,9 @@ final class SyncService {
 
         guard !storiesToSync.isEmpty else { return }
 
-        let ptTok = proxyAuthToken.flatMap { $0.isEmpty ? nil : $0 }
-        let client = APIClient(baseURLString: serverURL, token: token, proxyAuthToken: ptTok)
+        let ptId = proxyTokenId.flatMap { $0.isEmpty ? nil : $0 }
+        let ptTok = proxyToken.flatMap { $0.isEmpty ? nil : $0 }
+        let client = APIClient(baseURLString: serverURL, token: token, proxyTokenId: ptId, proxyToken: ptTok)
 
         // Process in batches of 5 — keeps each request small and avoids CrowdSec triggers
         let batches = stride(from: 0, to: storiesToSync.count, by: 5).map {
@@ -331,7 +335,7 @@ final class SyncService {
         guard let remoteURL = URL(string: "\(base)/api/story/\(storyID)/cover") else { return }
 
         var request = URLRequest(url: remoteURL)
-        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        request.setValue(token, forHTTPHeaderField: "X-Api-Key")
         guard let (data, response) = try? await URLSession.shared.data(for: request),
               let http = response as? HTTPURLResponse,
               http.statusCode == 200 else { return }

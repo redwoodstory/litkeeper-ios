@@ -6,7 +6,8 @@ struct ReadingQueueRow: View {
     let coverURL: URL?
     var fallbackURL: URL? = nil
     let token: String
-    var proxyAuthToken: String = ""
+    var proxyTokenId: String = ""
+    var proxyToken: String = ""
 
     private var relativeQueueDate: String? {
         guard let raw = story.queuedAt else { return nil }
@@ -40,7 +41,7 @@ struct ReadingQueueRow: View {
 
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
-            CoverImageView(url: coverURL, fallbackURL: fallbackURL, title: story.title, author: story.author, token: token, proxyAuthToken: proxyAuthToken)
+            CoverImageView(url: coverURL, fallbackURL: fallbackURL, title: story.title, author: story.author, token: token, proxyTokenId: proxyTokenId, proxyToken: proxyToken)
                 .frame(width: 60, height: 90)
                 .clipShape(RoundedRectangle(cornerRadius: 8))
                 .shadow(color: .black.opacity(0.15), radius: 3, x: 0, y: 1)
