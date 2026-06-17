@@ -21,7 +21,7 @@ final class SyncService {
 
     // MARK: - Cover Sync
 
-    func syncCovers(for stories: [Story], serverURL: String, token: String, pangolinTokenId: String? = nil, pangolinToken: String? = nil) async {
+    func syncCovers(for stories: [Story], serverURL: String, token: String, proxyAuthToken: String? = nil) async {
         guard !serverURL.isEmpty, !token.isEmpty, !isSyncingCovers else { return }
         isSyncingCovers = true
         defer { isSyncingCovers = false }
@@ -60,13 +60,11 @@ final class SyncService {
                     let capturedFilename = item.filename
                     let capturedURL = item.remoteURL
                     let capturedToken = token
-                    let capturedPangolinId = pangolinTokenId
-                    let capturedPangolinToken = pangolinToken
+                    let capturedProxyToken = proxyAuthToken
                     group.addTask {
                         var request = URLRequest(url: capturedURL)
                         request.setValue("Bearer \(capturedToken)", forHTTPHeaderField: "Authorization")
-                        if let id = capturedPangolinId { request.setValue(id, forHTTPHeaderField: "P-Access-Token-Id") }
-                        if let tok = capturedPangolinToken { request.setValue(tok, forHTTPHeaderField: "P-Access-Token") }
+                        if let tok = capturedProxyToken { request.setValue(tok, forHTTPHeaderField: "X-Auth-Token") }
                         guard let (data, response) = try? await URLSession.shared.data(for: request),
                               let http = response as? HTTPURLResponse,
                               http.statusCode == 200 else { return nil }
@@ -89,8 +87,7 @@ final class SyncService {
         for stories: [Story],
         serverURL: String,
         token: String,
-        pangolinTokenId: String? = nil,
-        pangolinToken: String? = nil,
+        proxyAuthToken: String? = nil,
         modelContext: ModelContext,
         localStories: [LocalStory]
     ) async {
@@ -111,9 +108,8 @@ final class SyncService {
 
         guard !storiesToSync.isEmpty else { return }
 
-        let ptId = pangolinTokenId.flatMap { $0.isEmpty ? nil : $0 }
-        let ptTok = pangolinToken.flatMap { $0.isEmpty ? nil : $0 }
-        let client = APIClient(baseURLString: serverURL, token: token, pangolinTokenId: ptId, pangolinToken: ptTok)
+        let ptTok = proxyAuthToken.flatMap { $0.isEmpty ? nil : $0 }
+        let client = APIClient(baseURLString: serverURL, token: token, proxyAuthToken: ptTok)
 
         // Process in batches of 5 — keeps each request small and avoids CrowdSec triggers
         let batches = stride(from: 0, to: storiesToSync.count, by: 5).map {

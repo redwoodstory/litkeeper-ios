@@ -38,8 +38,7 @@ struct ReadingQueueView: View {
                                     readingProgress: viewModel.progressByStoryID[story.id],
                                     coverURL: coverURL(for: story),
                                     token: appState.apiToken,
-                                    pangolinTokenId: appState.pangolinTokenId,
-                                    pangolinToken: appState.pangolinToken
+                                    proxyAuthToken: appState.proxyAuthToken
                                 )
                                 .contentShape(Rectangle())
                             }

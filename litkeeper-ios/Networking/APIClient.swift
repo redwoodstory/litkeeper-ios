@@ -3,11 +3,10 @@ import Foundation
 actor APIClient {
     private let baseURL: URL
     private let token: String
-    private let pangolinTokenId: String?
-    private let pangolinToken: String?
+    private let proxyAuthToken: String?
     private let session: URLSession
 
-    init(baseURLString: String, token: String, pangolinTokenId: String? = nil, pangolinToken: String? = nil) {
+    init(baseURLString: String, token: String, proxyAuthToken: String? = nil) {
         // Normalize: strip trailing slash
         let cleaned = baseURLString.hasSuffix("/")
             ? String(baseURLString.dropLast())
@@ -23,8 +22,7 @@ actor APIClient {
         }
         self.baseURL = URL(string: schemed) ?? URL(string: "https://localhost:5017")!
         self.token = token
-        self.pangolinTokenId = pangolinTokenId
-        self.pangolinToken = pangolinToken
+        self.proxyAuthToken = proxyAuthToken
         let config = URLSessionConfiguration.ephemeral
         config.timeoutIntervalForRequest = 30
         self.session = URLSession(configuration: config)
@@ -348,14 +346,68 @@ actor APIClient {
         return response.story
     }
 
+    // MARK: - Browse
+
+    func fetchBrowseCategories() async throws -> [BrowseCategory] {
+        let data = try await get("/api/browse/categories")
+        struct Response: Codable {
+            let success: Bool
+            let categories: [BrowseCategory]
+        }
+        return try decode(Response.self, from: data).categories
+    }
+
+    func browseByCategory(category: String, sort: String, page: Int) async throws -> BrowseResult {
+        let path = queryPath("/api/browse/category", params: [
+            ("category", category), ("sort", sort), ("page", "\(page)")
+        ])
+        return try decode(BrowseResult.self, from: try await get(path))
+    }
+
+    func browseGlobal(mode: String, page: Int) async throws -> BrowseResult {
+        let path = queryPath("/api/browse/global", params: [
+            ("mode", mode), ("page", "\(page)")
+        ])
+        return try decode(BrowseResult.self, from: try await get(path))
+    }
+
+    func fetchCustomListCategories() async throws -> [String] {
+        let data = try await get("/api/browse/custom_list/categories")
+        struct Response: Codable {
+            let success: Bool
+            let categories: [String]
+        }
+        return try decode(Response.self, from: data).categories
+    }
+
+    func browseCustomList(
+        category: String, sort: String, page: Int,
+        minScore: Double, minViews: Int, series: String, dateRange: String
+    ) async throws -> BrowseResult {
+        let path = queryPath("/api/browse/custom_list", params: [
+            ("category", category),
+            ("sort", sort),
+            ("page", "\(page)"),
+            ("min_score", String(format: "%.1f", minScore)),
+            ("min_views", "\(minViews)"),
+            ("series", series),
+            ("date_range", dateRange)
+        ])
+        return try decode(BrowseResult.self, from: try await get(path))
+    }
+
+    func queueBrowseStories(urls: [String]) async throws {
+        _ = try await post("/api/browse/queue-stories", body: ["story_urls": urls])
+    }
+
     // MARK: - Connection Test
 
     func testConnection() async throws {
         let data = try await get("/api/library")
-        // Reject HTML responses — Pangolin auth pages return 200 HTML when token auth fails
+        // Reject HTML responses — proxy auth pages return 200 HTML when the proxy token is missing/wrong
         if let first = data.first, first == UInt8(ascii: "<") {
-            print("[LK-API] ✗ testConnection: got HTML response, not JSON — Pangolin auth page?")
-            throw APIError.unauthorized
+            print("[LK-API] ✗ testConnection: got HTML response, not JSON — proxy auth page?")
+            throw APIError.proxyAuthRequired
         }
     }
 
@@ -365,15 +417,21 @@ actor APIClient {
         let url = URL(string: baseURL.absoluteString + path) ?? baseURL
         var req = URLRequest(url: url)
         req.httpMethod = method
-        req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        req.setValue(token, forHTTPHeaderField: "X-Api-Key")
         req.setValue("application/json", forHTTPHeaderField: "Accept")
-        if let id = pangolinTokenId {
-            req.setValue(id, forHTTPHeaderField: "P-Access-Token-Id")
-        }
-        if let tok = pangolinToken {
-            req.setValue(tok, forHTTPHeaderField: "P-Access-Token")
+        if let tok = proxyAuthToken {
+            req.setValue(tok, forHTTPHeaderField: "X-Auth-Token")
         }
         return req
+    }
+
+    private func queryPath(_ base: String, params: [(String, String)]) -> String {
+        guard !params.isEmpty else { return base }
+        let query = params.map { k, v in
+            let enc = v.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? v
+            return "\(k)=\(enc)"
+        }.joined(separator: "&")
+        return "\(base)?\(query)"
     }
 
     private func get(_ path: String) async throws -> Data {
@@ -412,27 +470,20 @@ actor APIClient {
         let fullURL = request.url?.absoluteString ?? "?"
         let start = Date()
 
-        // Debug: log full URL and Pangolin header presence
         print("[LK-API] → \(method) \(fullURL)")
-        if let id = pangolinTokenId {
-            print("[LK-API]   P-Access-Token-Id: …\(id.suffix(4)) (\(id.count) chars)")
+        if let tok = proxyAuthToken {
+            print("[LK-API]   Proxy Basic Auth: X-Auth-Token:…\(tok.suffix(4)) (\(tok.count) chars)")
         } else {
-            print("[LK-API]   P-Access-Token-Id: (not configured)")
-        }
-        if let tok = pangolinToken {
-            print("[LK-API]   P-Access-Token: …\(tok.suffix(4)) (\(tok.count) chars)")
-        } else {
-            print("[LK-API]   P-Access-Token: (not configured)")
+            print("[LK-API]   Proxy Basic Auth: (not configured)")
         }
 
         // Preserve auth headers across redirects — URLSession strips custom headers by default,
-        // which drops P-Access-Token on any HTTP redirect and causes a 403.
+        // which causes a 403 on any HTTP redirect through a proxy.
         var authHeaders: [String: String] = [
-            "Authorization": "Bearer \(token)",
+            "X-Api-Key": token,
             "Accept": "application/json"
         ]
-        if let id = pangolinTokenId { authHeaders["P-Access-Token-Id"] = id }
-        if let tok = pangolinToken { authHeaders["P-Access-Token"] = tok }
+        if let tok = proxyAuthToken { authHeaders["X-Auth-Token"] = tok }
         let redirectDelegate = HeaderPreservingDelegate(headers: authHeaders)
 
         do {
@@ -510,8 +561,8 @@ struct BulkContentResponse: Codable {
 }
 
 // Preserves custom auth headers when URLSession follows HTTP redirects.
-// URLSession strips non-standard headers (Authorization, P-Access-Token-*) on redirect
-// by default, which causes Pangolin to return 403 on the redirected request.
+// URLSession strips non-standard headers on redirect by default, which causes a 403
+// when a reverse proxy re-checks auth on the redirected request.
 private final class HeaderPreservingDelegate: NSObject, URLSessionTaskDelegate {
     private let headers: [String: String]
 

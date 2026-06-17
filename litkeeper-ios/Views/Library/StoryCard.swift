@@ -7,13 +7,12 @@ struct StoryCard: View {
     var isFavorited: Bool = false
     let coverURL: URL?
     var token: String = ""
-    var pangolinTokenId: String = ""
-    var pangolinToken: String = ""
+    var proxyAuthToken: String = ""
     var showCategory: Bool = false
 
     var body: some View {
         VStack(spacing: 4) {
-            CoverImageView(url: coverURL, title: story.title, author: story.author, token: token, pangolinTokenId: pangolinTokenId, pangolinToken: pangolinToken)
+            CoverImageView(url: coverURL, title: story.title, author: story.author, token: token, proxyAuthToken: proxyAuthToken)
                 .aspectRatio(2/3, contentMode: .fit)
                 .clipShape(RoundedRectangle(cornerRadius: 8))
                 .shadow(color: .black.opacity(0.2), radius: 4, x: 0, y: 2)

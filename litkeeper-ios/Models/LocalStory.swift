@@ -103,7 +103,7 @@ final class LocalStory {
             queuedAt: queuedAt.map { isoFormatter.string(from: $0) },
             lastOpenedAt: lastOpenedAt.map { isoFormatter.string(from: $0) },
             description: storyDescription,
-            dateAdded: nil,
+            dateAdded: ISO8601DateFormatter().string(from: downloadedAt),
             updatedAt: nil
         )
     }

@@ -89,9 +89,22 @@ final class LibraryViewModel {
         downloadedStoryIDs.contains(story.id)
     }
 
+    /// Call before the first server sync to surface local data immediately.
+    /// Falls back from UserDefaults cache → SwiftData local stories → empty.
+    func loadLocalData(localStories: [LocalStory] = []) {
+        guard stories.isEmpty else { return }
+        let cached = readCache()
+        if !cached.isEmpty {
+            stories = cached
+            isShowingCachedData = true
+        } else if !localStories.isEmpty {
+            stories = localStories.map { $0.asStory }
+            isShowingCachedData = true
+        }
+    }
+
     func refresh(appState: AppState, silent: Bool = false) async {
         guard appState.isConfigured else {
-            stories = []
             isShowingCachedData = false
             return
         }
@@ -102,40 +115,28 @@ final class LibraryViewModel {
             let fetched = try await client.fetchLibrary()
             stories = fetched
             isShowingCachedData = false
-            saveLibraryCache(fetched)
+            saveCache(fetched)
         } catch let error as APIError {
-            if case .networkError = error {
-                // Transient network failure — load cache if we have nothing to show
-                if stories.isEmpty {
-                    let cached = loadLibraryCache()
-                    if !cached.isEmpty {
-                        stories = cached
-                        isShowingCachedData = true
-                    }
-                }
-            } else if !silent {
-                errorMessage = error.localizedDescription
+            switch error {
+            case .unauthorized, .notConfigured:
+                if !silent { errorMessage = error.localizedDescription }
+            default:
+                break
             }
+            isShowingCachedData = !stories.isEmpty
         } catch {
-            if stories.isEmpty {
-                let cached = loadLibraryCache()
-                if !cached.isEmpty {
-                    stories = cached
-                    isShowingCachedData = true
-                }
-            }
-            if !silent { errorMessage = error.localizedDescription }
+            isShowingCachedData = !stories.isEmpty
         }
         isLoading = false
         hasAttemptedLoad = true
     }
 
-    private func saveLibraryCache(_ stories: [Story]) {
+    private func saveCache(_ stories: [Story]) {
         guard let data = try? JSONEncoder().encode(stories) else { return }
         UserDefaults.standard.set(data, forKey: Self.cacheKey)
     }
 
-    private func loadLibraryCache() -> [Story] {
+    private func readCache() -> [Story] {
         guard let data = UserDefaults.standard.data(forKey: Self.cacheKey),
               let stories = try? JSONDecoder().decode([Story].self, from: data)
         else { return [] }

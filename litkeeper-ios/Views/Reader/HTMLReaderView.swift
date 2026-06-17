@@ -140,6 +140,8 @@ struct HTMLReaderView: View {
     @State private var lastPushedFraction: Double = -1
     @State private var serverScrollFraction: Double? = nil
     @State private var didFireCompletionHaptic = false
+    @State private var showRateStoryModal = false
+    @State private var headerRating: Int? = nil
     @State private var readerItems: [ReaderItem] = []
     @State private var quoteAlertVisible = false
     @State private var quoteErrorAlertVisible = false
@@ -181,8 +183,12 @@ struct HTMLReaderView: View {
                 colorThemeRaw = (systemColorScheme == .dark ? ReaderTheme.darkNavy : .beige).rawValue
             }
         }
-        .task { 
+        .task {
             await loadContent()
+            // Pre-suppress modal if story was already at/near the end when opened
+            if (localStory?.readingProgressPercentage ?? 0) >= 99 {
+                didFireCompletionHaptic = true
+            }
             // Track story opened
             if let localStory {
                 localStory.lastOpenedAt = Date()
@@ -357,6 +363,32 @@ struct HTMLReaderView: View {
                         }
                     }
                 }
+                HStack(spacing: 12) {
+                    Button {
+                        showRateStoryModal = true
+                    } label: {
+                        Label("Rate Story", systemImage: "star")
+                            .font(.subheadline)
+                            .foregroundStyle(theme.secondary)
+                            .padding(.vertical, 10)
+                            .padding(.horizontal, 20)
+                            .overlay(Capsule().stroke(theme.border, lineWidth: 1))
+                    }
+                    .buttonStyle(.plain)
+
+                    if let commentsURL = story.sourceURL.flatMap({ URL(string: ($0.hasSuffix("/") ? String($0.dropLast()) : $0) + "/comments") }) {
+                        Link(destination: commentsURL) {
+                            Label("View Comments", systemImage: "bubble.left.and.bubble.right")
+                                .font(.subheadline)
+                                .foregroundStyle(theme.secondary)
+                                .padding(.vertical, 10)
+                                .padding(.horizontal, 20)
+                                .overlay(Capsule().stroke(theme.border, lineWidth: 1))
+                        }
+                    }
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.top, 32)
                 Color.clear.frame(height: 32)
             }
             .padding(.horizontal, CGFloat(hPadding))
@@ -489,6 +521,23 @@ struct HTMLReaderView: View {
             }
         }
         .animation(.easeInOut(duration: 0.25), value: showControls)
+        .overlay {
+            if showRateStoryModal {
+                RateStoryModalView(
+                    story: story,
+                    appState: appState,
+                    isPresented: $showRateStoryModal
+                ) { newRating in
+                    if let localStory {
+                        localStory.rating = newRating
+                        try? modelContext.save()
+                    }
+                }
+                .transition(.opacity.combined(with: .scale(scale: 0.95)))
+                .zIndex(10)
+            }
+        }
+        .animation(.spring(response: 0.3, dampingFraction: 0.8), value: showRateStoryModal)
         .sheet(isPresented: $showSettings) {
             ReaderSettingsView(
                 fontSize: $fontSize,
@@ -529,7 +578,6 @@ struct HTMLReaderView: View {
 
     // MARK: - Story header card (mirrors Flask .story-header)
 
-    @ViewBuilder
     private func storyHeader(content: StoryContent) -> some View {
         VStack(spacing: 14) {
             Text(content.title ?? story.title)
@@ -574,12 +622,29 @@ struct HTMLReaderView: View {
                     .lineLimit(8)
                     .padding(.top, 2)
             }
+
+            Rectangle()
+                .fill(theme.border)
+                .frame(height: 1)
+                .padding(.top, 4)
+
+            RatingView(rating: headerRating) { newRating in
+                let value = newRating == 0 ? nil : Optional(newRating)
+                headerRating = value
+                if let localStory {
+                    localStory.rating = value
+                    try? modelContext.save()
+                }
+                let storyID = story.id
+                Task { try? await appState.makeAPIClient().updateRating(storyID: storyID, rating: newRating) }
+            }
         }
         .padding(24)
         .frame(maxWidth: .infinity)
         .background(RoundedRectangle(cornerRadius: 16).fill(theme.card))
         .overlay(RoundedRectangle(cornerRadius: 16).stroke(theme.border, lineWidth: 1))
         .padding(.bottom, 28)
+        .onAppear { headerRating = localStory?.rating ?? story.rating }
     }
 
     // MARK: - Controls overlay (header + footer rendered separately for directional transitions)
@@ -727,9 +792,8 @@ struct HTMLReaderView: View {
         let serverBase    = appState.serverURL.hasSuffix("/")
             ? String(appState.serverURL.dropLast())
             : appState.serverURL
-        let apiToken         = appState.apiToken
-        let pangolinTokenId  = appState.pangolinTokenId
-        let pangolinToken    = appState.pangolinToken
+        let apiToken      = appState.apiToken
+        let proxyAuthToken = appState.proxyAuthToken
 
         // ── 1. Load story JSON ────────────────────────────────────────────
         let decoded: StoryContent
@@ -753,11 +817,8 @@ struct HTMLReaderView: View {
             if !apiToken.isEmpty {
                 request.setValue("Bearer \(apiToken)", forHTTPHeaderField: "Authorization")
             }
-            if !pangolinTokenId.isEmpty {
-                request.setValue(pangolinTokenId, forHTTPHeaderField: "P-Access-Token-Id")
-            }
-            if !pangolinToken.isEmpty {
-                request.setValue(pangolinToken, forHTTPHeaderField: "P-Access-Token")
+            if !proxyAuthToken.isEmpty {
+                request.setValue(proxyAuthToken, forHTTPHeaderField: "X-Auth-Token")
             }
             do {
                 let (data, response) = try await URLSession.shared.data(for: request)

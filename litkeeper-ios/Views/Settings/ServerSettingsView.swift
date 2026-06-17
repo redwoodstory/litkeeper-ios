@@ -5,8 +5,7 @@ struct ServerSettingsView: View {
 
     @State private var urlDraft: String = ""
     @State private var tokenDraft: String = ""
-    @State private var pangolinTokenIdDraft: String = ""
-    @State private var pangolinTokenDraft: String = ""
+    @State private var proxyAuthTokenDraft: String = ""
     @State private var testResult: TestResult? = nil
     @State private var isTesting = false
     @State private var showDisconnectConfirm = false
@@ -15,6 +14,7 @@ struct ServerSettingsView: View {
     enum TestResult {
         case success
         case unauthorized
+        case proxyAuthRequired
         case unreachable
         case failure(String)
     }
@@ -50,28 +50,19 @@ struct ServerSettingsView: View {
             }
 
             Section {
-                LabeledContent("Token ID") {
-                    SecureField("P-Access-Token-Id value", text: $pangolinTokenIdDraft)
+                LabeledContent("Proxy Token") {
+                    SecureField("X-Auth-Token value", text: $proxyAuthTokenDraft)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
                         .multilineTextAlignment(.trailing)
                         .onSubmit {
-                            appState.pangolinTokenId = pangolinTokenIdDraft
-                        }
-                }
-                LabeledContent("Token") {
-                    SecureField("P-Access-Token value", text: $pangolinTokenDraft)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                        .multilineTextAlignment(.trailing)
-                        .onSubmit {
-                            appState.pangolinToken = pangolinTokenDraft
+                            appState.proxyAuthToken = proxyAuthTokenDraft
                         }
                 }
             } header: {
-                Text("Pangolin Access Control")
+                Text("Proxy Authentication")
             } footer: {
-                Text("Required when accessing via Pangolin from outside your LAN. Find these under Access > [your resource] in the Pangolin dashboard. Leave blank for direct LAN access.")
+                Text("Optional. Required when your server is behind a reverse proxy with header-based access control (e.g. Pangolin, Authelia). The app sends this value as the X-Auth-Token header. Leave blank for direct access.")
                     .font(.caption)
             }
 
@@ -95,7 +86,10 @@ struct ServerSettingsView: View {
                         Label("Connected successfully", systemImage: "checkmark.circle.fill")
                             .foregroundStyle(.green)
                     case .unauthorized:
-                        Label("Invalid API token", systemImage: "lock.slash.fill")
+                        Label("Invalid API token — check the token in the Connection section", systemImage: "lock.slash.fill")
+                            .foregroundStyle(.red)
+                    case .proxyAuthRequired:
+                        Label("Proxy auth failed — enter the correct token in Proxy Authentication", systemImage: "shield.slash.fill")
                             .foregroundStyle(.red)
                     case .unreachable:
                         Label("Server unreachable", systemImage: "wifi.slash")
@@ -123,8 +117,7 @@ struct ServerSettingsView: View {
         .onAppear {
             urlDraft = appState.serverURL
             tokenDraft = appState.apiToken
-            pangolinTokenIdDraft = appState.pangolinTokenId
-            pangolinTokenDraft = appState.pangolinToken
+            proxyAuthTokenDraft = appState.proxyAuthToken
             // Mark as appeared AFTER setting drafts so onChange handlers below
             // don't write back to appState during initialization (which would
             // cause isConfigured to flicker false→true and trigger a spurious
@@ -139,11 +132,7 @@ struct ServerSettingsView: View {
             guard hasAppeared else { return }
             testResult = nil
         }
-        .onChange(of: pangolinTokenIdDraft) { _, _ in
-            guard hasAppeared else { return }
-            testResult = nil
-        }
-        .onChange(of: pangolinTokenDraft) { _, _ in
+        .onChange(of: proxyAuthTokenDraft) { _, _ in
             guard hasAppeared else { return }
             testResult = nil
         }
@@ -155,12 +144,10 @@ struct ServerSettingsView: View {
             Button("Disconnect", role: .destructive) {
                 appState.serverURL = ""
                 appState.apiToken = ""
-                appState.pangolinTokenId = ""
-                appState.pangolinToken = ""
+                appState.proxyAuthToken = ""
                 urlDraft = ""
                 tokenDraft = ""
-                pangolinTokenIdDraft = ""
-                pangolinTokenDraft = ""
+                proxyAuthTokenDraft = ""
                 testResult = nil
             }
         } message: {
@@ -174,11 +161,8 @@ struct ServerSettingsView: View {
         // Save drafts before testing
         appState.serverURL = urlDraft
         appState.apiToken = tokenDraft
-        appState.pangolinTokenId = pangolinTokenIdDraft
-        appState.pangolinToken = pangolinTokenDraft
-        let idLen = appState.pangolinTokenId.count
-        let tokLen = appState.pangolinToken.count
-        print("[LK-Settings] testConnection — pangolinTokenId: \(idLen) chars, pangolinToken: \(tokLen) chars")
+        appState.proxyAuthToken = proxyAuthTokenDraft
+        print("[LK-Settings] testConnection — proxyAuthToken: \(appState.proxyAuthToken.count) chars")
         let client = appState.makeAPIClient()
         Task {
             do {
@@ -192,6 +176,8 @@ struct ServerSettingsView: View {
                     switch apiError {
                     case .unauthorized:
                         testResult = .unauthorized
+                    case .proxyAuthRequired:
+                        testResult = .proxyAuthRequired
                     case .networkError(let underlying):
                         let detail: String
                         if let urlErr = underlying as? URLError {

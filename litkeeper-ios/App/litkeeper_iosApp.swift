@@ -40,12 +40,12 @@ struct RootView: View {
                 .tabItem { Label("Library", systemImage: "books.vertical") }
                 .tag(0)
 
-            ReadingQueueView()
-                .tabItem { Label("Queue", systemImage: "list.bullet") }
+            BrowseView()
+                .tabItem { Label("Browse", systemImage: "magnifyingglass") }
                 .tag(1)
 
-            QueueView()
-                .tabItem { Label("History", systemImage: "clock") }
+            ReadingQueueView()
+                .tabItem { Label("Queue", systemImage: "list.bullet") }
                 .tag(2)
 
             HighlightsView()

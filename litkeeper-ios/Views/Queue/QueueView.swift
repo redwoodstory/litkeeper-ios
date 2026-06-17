@@ -22,11 +22,19 @@ struct QueueView: View {
                 } else if viewModel.isLoading && viewModel.items.isEmpty {
                     QueueSkeletonView()
                 } else if viewModel.items.isEmpty {
-                    EmptyStateView(
-                        icon: "clock",
-                        title: "No History Yet",
-                        message: "Your server's download history will appear here."
-                    )
+                    if viewModel.isOffline {
+                        EmptyStateView(
+                            icon: "wifi.slash",
+                            title: "Offline",
+                            message: "Download history requires a server connection."
+                        )
+                    } else {
+                        EmptyStateView(
+                            icon: "clock",
+                            title: "No History Yet",
+                            message: "Your server's download history will appear here."
+                        )
+                    }
                 } else {
                     List {
                         

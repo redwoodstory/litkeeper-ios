@@ -53,11 +53,8 @@ final class ReadingQueueViewModel {
         do {
             stories = try await client.fetchLibrary()
             await fetchProgressForQueue(client: client)
-        } catch let error as APIError {
-            if case .networkError = error { /* transient — never alert */ }
-            else if !silent { errorMessage = error.localizedDescription }
         } catch {
-            if !silent { errorMessage = error.localizedDescription }
+            // Sync failed — view falls back to offlineQueue from SwiftData
         }
         isLoading = false
         hasAttemptedLoad = true

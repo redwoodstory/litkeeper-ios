@@ -5,8 +5,7 @@ struct CoverImageView: View {
     let title: String
     let author: String
     var token: String = ""
-    var pangolinTokenId: String = ""
-    var pangolinToken: String = ""
+    var proxyAuthToken: String = ""
 
     @State private var loadedImage: UIImage? = nil
     @State private var isLoading: Bool = true
@@ -29,8 +28,10 @@ struct CoverImageView: View {
             }
         }
         .task(id: url) {
-            loadedImage = nil
-            isLoading = true
+            // Don't wipe loadedImage before the new one arrives — keeps the existing
+            // cover visible while reloading (avoids flash to skeleton/placeholder).
+            if url == nil { loadedImage = nil }
+            isLoading = url != nil
             await loadImage()
             isLoading = false
         }
@@ -56,8 +57,7 @@ struct CoverImageView: View {
         if !token.isEmpty {
             request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         }
-        if !pangolinTokenId.isEmpty { request.setValue(pangolinTokenId, forHTTPHeaderField: "P-Access-Token-Id") }
-        if !pangolinToken.isEmpty { request.setValue(pangolinToken, forHTTPHeaderField: "P-Access-Token") }
+        if !proxyAuthToken.isEmpty { request.setValue(proxyAuthToken, forHTTPHeaderField: "X-Auth-Token") }
         guard let (data, response) = try? await URLSession.shared.data(for: request),
               let http = response as? HTTPURLResponse else {
             print("[LK-IMG] ✗ No response for \(url.lastPathComponent)")

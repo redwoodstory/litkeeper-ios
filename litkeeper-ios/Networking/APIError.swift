@@ -3,6 +3,7 @@ import Foundation
 enum APIError: LocalizedError {
     case notConfigured
     case unauthorized
+    case proxyAuthRequired
     case notFound
     case serverError(Int)
     case networkError(Error)
@@ -14,7 +15,9 @@ enum APIError: LocalizedError {
         case .notConfigured:
             return "Server not configured. Go to Settings to add your server URL and token."
         case .unauthorized:
-            return "Invalid API token. Check your token in Settings."
+            return "Invalid API token. Check your LitKeeper token in Settings."
+        case .proxyAuthRequired:
+            return "Proxy authentication failed. Enter the correct token in Settings → Proxy Authentication."
         case .notFound:
             return "Not found."
         case .serverError(let code):

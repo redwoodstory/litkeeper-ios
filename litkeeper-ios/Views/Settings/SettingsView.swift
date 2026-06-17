@@ -84,6 +84,12 @@ struct SettingsView: View {
                     Text("Local Storage")
                 }
 
+                Section("History") {
+                    NavigationLink("Download History") {
+                        QueueView()
+                    }
+                }
+
                 Section("About") {
                     LabeledContent("Version", value: appVersion)
                 }

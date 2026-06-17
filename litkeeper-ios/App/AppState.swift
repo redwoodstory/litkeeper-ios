@@ -9,11 +9,8 @@ final class AppState {
     var apiToken: String {
         didSet { KeychainHelper.write(key: "apiToken", value: apiToken) }
     }
-    var pangolinTokenId: String {
-        didSet { KeychainHelper.write(key: "pangolinTokenId", value: pangolinTokenId) }
-    }
-    var pangolinToken: String {
-        didSet { KeychainHelper.write(key: "pangolinToken", value: pangolinToken) }
+    var proxyAuthToken: String {
+        didSet { KeychainHelper.write(key: "proxyAuthToken", value: proxyAuthToken) }
     }
     var biometricLockEnabled: Bool {
         didSet { UserDefaults.standard.set(biometricLockEnabled, forKey: "biometricLockEnabled") }
@@ -27,8 +24,15 @@ final class AppState {
     init() {
         serverURL = UserDefaults.standard.string(forKey: "serverURL") ?? ""
         apiToken = KeychainHelper.read(key: "apiToken") ?? ""
-        pangolinTokenId = KeychainHelper.read(key: "pangolinTokenId") ?? ""
-        pangolinToken = KeychainHelper.read(key: "pangolinToken") ?? ""
+        var resolvedProxyToken = KeychainHelper.read(key: "proxyAuthToken") ?? ""
+        if resolvedProxyToken.isEmpty,
+           let legacyTok = KeychainHelper.read(key: "pangolinToken"), !legacyTok.isEmpty {
+            resolvedProxyToken = legacyTok
+            KeychainHelper.write(key: "proxyAuthToken", value: legacyTok)
+        }
+        KeychainHelper.delete(key: "pangolinTokenId")
+        KeychainHelper.delete(key: "pangolinToken")
+        proxyAuthToken = resolvedProxyToken
         biometricLockEnabled = UserDefaults.standard.bool(forKey: "biometricLockEnabled")
     }
 
@@ -36,8 +40,7 @@ final class AppState {
         APIClient(
             baseURLString: serverURL,
             token: apiToken,
-            pangolinTokenId: pangolinTokenId.isEmpty ? nil : pangolinTokenId,
-            pangolinToken: pangolinToken.isEmpty ? nil : pangolinToken
+            proxyAuthToken: proxyAuthToken.isEmpty ? nil : proxyAuthToken
         )
     }
 

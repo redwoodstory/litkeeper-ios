@@ -167,7 +167,7 @@ struct StoryDetailView: View {
     @ViewBuilder
     private var headerSection: some View {
         HStack(alignment: .top, spacing: 16) {
-            CoverImageView(url: coverURL, title: editableTitle, author: editableAuthor, token: appState.apiToken, pangolinTokenId: appState.pangolinTokenId, pangolinToken: appState.pangolinToken)
+            CoverImageView(url: coverURL, title: editableTitle, author: editableAuthor, token: appState.apiToken, proxyAuthToken: appState.proxyAuthToken)
                 .frame(width: 100, height: 150)
                 .clipShape(RoundedRectangle(cornerRadius: 10))
                 .shadow(color: .black.opacity(0.18), radius: 6, x: 0, y: 3)
@@ -557,10 +557,18 @@ struct StoryDetailView: View {
     }
 
     private var coverURL: URL? {
-        let filename = story.cover ?? "\(story.id)_\(story.filenameBase).jpg"
-        let localURL = DownloadManager.shared.localCoverURL(filename: filename)
-        if FileManager.default.fileExists(atPath: localURL.path) {
-            return localURL
+        // 1. LocalStory.coverLocalPath — recorded by downloadStory, most authoritative
+        if let path = localStory?.coverLocalPath {
+            let url = DownloadManager.shared.coversDirectory.appendingPathComponent(path)
+            if FileManager.default.fileExists(atPath: url.path) { return url }
+        }
+        // 2. Deterministic path — always used by downloadStory
+        let deterministic = DownloadManager.shared.localCoverURL(storyID: story.id, filenameBase: story.filenameBase)
+        if FileManager.default.fileExists(atPath: deterministic.path) { return deterministic }
+        // 3. Server-provided cover filename — used by syncCovers when story.cover != nil
+        if let cover = story.cover {
+            let byCoverField = DownloadManager.shared.localCoverURL(filename: cover)
+            if FileManager.default.fileExists(atPath: byCoverField.path) { return byCoverField }
         }
         guard !appState.serverURL.isEmpty else { return nil }
         let base = appState.serverURL.hasSuffix("/") ? String(appState.serverURL.dropLast()) : appState.serverURL
@@ -602,8 +610,7 @@ struct StoryDetailView: View {
                     story: story,
                     serverBaseURL: appState.serverURL,
                     token: appState.apiToken,
-                    pangolinTokenId: appState.pangolinTokenId,
-                    pangolinToken: appState.pangolinToken,
+                    proxyAuthToken: appState.proxyAuthToken,
                     modelContext: modelContext
                 ) { _, _ in }
             } catch {

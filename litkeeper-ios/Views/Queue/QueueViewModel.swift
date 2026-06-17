@@ -6,6 +6,7 @@ final class QueueViewModel {
     var items: [QueueItem] = []
     var stats: QueueStats? = nil
     var isLoading = false
+    var isOffline = false
     var errorMessage: String? = nil
 
     private var refreshTask: Task<Void, Never>? = nil
@@ -23,11 +24,16 @@ final class QueueViewModel {
                 !(item.jobType == "author" && item.status == .completed)
             }
             stats = newStats
+            isOffline = false
         } catch let error as APIError {
-            if case .networkError = error { /* transient — never alert */ }
-            else if !silent { errorMessage = error.localizedDescription }
+            switch error {
+            case .unauthorized, .notConfigured:
+                if !silent { errorMessage = error.localizedDescription }
+            default:
+                isOffline = true
+            }
         } catch {
-            if !silent { errorMessage = error.localizedDescription }
+            isOffline = true
         }
         isLoading = false
         hasAttemptedLoad = true

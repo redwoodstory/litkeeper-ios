@@ -62,8 +62,7 @@ final class DownloadManager {
         story: Story,
         serverBaseURL: String,
         token: String,
-        pangolinTokenId: String? = nil,
-        pangolinToken: String? = nil,
+        proxyAuthToken: String? = nil,
         modelContext: ModelContext,
         onProgress: @escaping (Double, String) -> Void
     ) async throws {
@@ -79,7 +78,7 @@ final class DownloadManager {
             onProgress(0.0, "Downloading EPUB…")
             let url = base.appendingPathComponent("epub/file/\(story.id)")
             let dest = localEPUBURL(storyID: story.id, filenameBase: story.filenameBase)
-            try await downloadFile(from: url, token: token, pangolinTokenId: pangolinTokenId, pangolinToken: pangolinToken, to: dest)
+            try await downloadFile(from: url, token: token, proxyAuthToken: proxyAuthToken, to: dest)
             epubPath = "\(story.id)_\(story.filenameBase).epub"
             onProgress(0.5, "EPUB saved")
         }
@@ -89,7 +88,7 @@ final class DownloadManager {
             onProgress(story.hasEPUB ? 0.5 : 0.0, "Downloading HTML…")
             let url = base.appendingPathComponent("download/\(story.filenameBase).json")
             let dest = localHTMLURL(storyID: story.id, filenameBase: story.filenameBase)
-            try await downloadFile(from: url, token: token, pangolinTokenId: pangolinTokenId, pangolinToken: pangolinToken, to: dest)
+            try await downloadFile(from: url, token: token, proxyAuthToken: proxyAuthToken, to: dest)
             htmlPath = "\(story.id)_\(story.filenameBase).json"
             onProgress(0.85, "HTML saved")
         }
@@ -99,7 +98,7 @@ final class DownloadManager {
         onProgress(0.85, "Downloading cover…")
         let coverRemoteURL = base.appendingPathComponent("api/story/\(story.id)/cover")
         let coverDest = localCoverURL(storyID: story.id, filenameBase: story.filenameBase)
-        try? await downloadFile(from: coverRemoteURL, token: token, pangolinTokenId: pangolinTokenId, pangolinToken: pangolinToken, to: coverDest)
+        try? await downloadFile(from: coverRemoteURL, token: token, proxyAuthToken: proxyAuthToken, to: coverDest)
         coverPath = coverFilename
 
         // 4. Persist to SwiftData
@@ -125,11 +124,10 @@ final class DownloadManager {
         onProgress(1.0, "Done")
     }
 
-    private func downloadFile(from url: URL, token: String, pangolinTokenId: String? = nil, pangolinToken: String? = nil, to destination: URL) async throws {
+    private func downloadFile(from url: URL, token: String, proxyAuthToken: String? = nil, to destination: URL) async throws {
         var request = URLRequest(url: url)
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        if let id = pangolinTokenId { request.setValue(id, forHTTPHeaderField: "P-Access-Token-Id") }
-        if let tok = pangolinToken { request.setValue(tok, forHTTPHeaderField: "P-Access-Token") }
+        if let tok = proxyAuthToken { request.setValue(tok, forHTTPHeaderField: "X-Auth-Token") }
         request.timeoutInterval = 120
 
         let (tempURL, response) = try await URLSession.shared.download(for: request)
