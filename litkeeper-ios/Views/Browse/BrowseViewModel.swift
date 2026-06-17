@@ -21,14 +21,30 @@ final class BrowseViewModel {
     // Top Lists
     var globalTab = "top_rated"
 
-    // Custom List
+    // Custom List — all filter state persisted via UserDefaults
     var customCategories: [String] = []
-    var customCategory = ""
-    var customSort = "score_desc"
-    var minScore: Double = 4.5
-    var minViews: Int = 100
-    var seriesFilter = "all"
-    var dateRange = "all"
+
+    var customCategory: String = UserDefaults.standard.string(forKey: "browse.customCategory") ?? "" {
+        didSet { UserDefaults.standard.set(customCategory, forKey: "browse.customCategory") }
+    }
+    var customSort: String = UserDefaults.standard.string(forKey: "browse.customSort") ?? "score_desc" {
+        didSet { UserDefaults.standard.set(customSort, forKey: "browse.customSort") }
+    }
+    var minScore: Double = (UserDefaults.standard.object(forKey: "browse.minScore") as? Double) ?? 4.5 {
+        didSet { UserDefaults.standard.set(minScore, forKey: "browse.minScore") }
+    }
+    var minViews: Int = (UserDefaults.standard.object(forKey: "browse.minViews") as? Int) ?? 100 {
+        didSet { UserDefaults.standard.set(minViews, forKey: "browse.minViews") }
+    }
+    var minFaves: Int = (UserDefaults.standard.object(forKey: "browse.minFaves") as? Int) ?? 0 {
+        didSet { UserDefaults.standard.set(minFaves, forKey: "browse.minFaves") }
+    }
+    var seriesFilter: String = UserDefaults.standard.string(forKey: "browse.seriesFilter") ?? "all" {
+        didSet { UserDefaults.standard.set(seriesFilter, forKey: "browse.seriesFilter") }
+    }
+    var dateRange: String = UserDefaults.standard.string(forKey: "browse.dateRange") ?? "all" {
+        didSet { UserDefaults.standard.set(dateRange, forKey: "browse.dateRange") }
+    }
 
     // Content
     var stories: [BrowseStory] = []
@@ -59,7 +75,6 @@ final class BrowseViewModel {
         }
         if let customCats, !customCats.isEmpty {
             customCategories = customCats
-            customCategory = customCats.first ?? ""
             customListAvailable = true
         }
         await load(apiClient: apiClient)
@@ -118,6 +133,7 @@ final class BrowseViewModel {
                 page: p,
                 minScore: minScore,
                 minViews: minViews,
+                minFaves: minFaves,
                 series: seriesFilter,
                 dateRange: dateRange
             )

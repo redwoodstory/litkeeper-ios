@@ -25,6 +25,7 @@ struct BrowseView: View {
                 BrowseFilterView(
                     minScore: $viewModel.minScore,
                     minViews: $viewModel.minViews,
+                    minFaves: $viewModel.minFaves,
                     seriesFilter: $viewModel.seriesFilter,
                     dateRange: $viewModel.dateRange
                 )
@@ -93,8 +94,9 @@ struct BrowseView: View {
             EmptyView()
         case .customList:
             Picker("Category", selection: $viewModel.customCategory) {
+                Text("All Categories").tag("")
                 ForEach(viewModel.customCategories, id: \.self) { cat in
-                    Text(cat.capitalized).tag(cat)
+                    Text(cat.replacingOccurrences(of: "-", with: " ").capitalized).tag(cat)
                 }
             }
             .pickerStyle(.menu)
@@ -104,11 +106,14 @@ struct BrowseView: View {
 
     @ViewBuilder
     private var storyRows: some View {
+        let showCategory = viewModel.mode == .global
+            || (viewModel.mode == .customList && viewModel.customCategory.isEmpty)
         ForEach(viewModel.stories) { story in
             BrowseStoryRow(
                 story: story,
                 isInLibrary: story.inLibrary,
                 isQueued: story.isQueued || viewModel.queuedURLs.contains(story.url),
+                showCategory: showCategory,
                 onAdd: {
                     await viewModel.queueStory(
                         url: story.url,

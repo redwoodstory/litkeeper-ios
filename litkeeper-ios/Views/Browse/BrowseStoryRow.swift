@@ -4,30 +4,44 @@ struct BrowseStoryRow: View {
     let story: BrowseStory
     let isInLibrary: Bool
     let isQueued: Bool
+    let showCategory: Bool
     let onAdd: () async -> Void
 
     @State private var isAdding = false
+    @State private var safariURL: URL?
 
     var body: some View {
         HStack(alignment: .center, spacing: 12) {
             VStack(alignment: .leading, spacing: 3) {
-                Text(story.title)
-                    .font(.headline)
-                    .lineLimit(2)
-
-                if let author = story.authorName {
-                    Text(author)
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
+                // Tappable title — opens story in in-app browser
+                Button {
+                    if let url = URL(string: story.url) { safariURL = url }
+                } label: {
+                    Text(story.title)
+                        .font(.headline)
+                        .lineLimit(2)
+                        .foregroundStyle(.primary)
+                        .multilineTextAlignment(.leading)
                 }
+                .buttonStyle(.plain)
 
+                // Stats: ★ rating · ♥ faves · views · series
                 Text(primaryMetadata)
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                if !secondaryMetadata.isEmpty {
-                    Text(secondaryMetadata)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+
+                // Context: date · author + optional category badge
+                if !secondaryMetadata.isEmpty || (showCategory && story.category != nil) {
+                    HStack(alignment: .center, spacing: 4) {
+                        if !secondaryMetadata.isEmpty {
+                            Text(secondaryMetadata)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        if showCategory, let cat = story.category {
+                            categoryBadge(cat)
+                        }
+                    }
                 }
 
                 if let desc = story.description, !desc.isEmpty {
@@ -44,6 +58,7 @@ struct BrowseStoryRow: View {
             actionButton
         }
         .padding(.vertical, 2)
+        .sheet(item: $safariURL) { SafariView(url: $0) }
     }
 
     @ViewBuilder
@@ -75,23 +90,38 @@ struct BrowseStoryRow: View {
         }
     }
 
-    // Line 1: ratings and engagement numbers
+    @ViewBuilder
+    private func categoryBadge(_ slug: String) -> some View {
+        Text(formatCategory(slug))
+            .font(.system(size: 10, weight: .medium))
+            .textCase(.uppercase)
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 7)
+            .padding(.vertical, 2)
+            .background(Capsule().fill(Color(.systemFill)))
+    }
+
+    // ★ rating · ♥ faves · views · series
     private var primaryMetadata: String {
         var parts: [String] = []
         if let score = story.score { parts.append("★ \(score)") }
+        if let faves = story.voteCount, let n = Int(faves), n > 0 { parts.append("♥ \(formatCount(n))") }
         if let count = story.readCount, let n = Int(count) { parts.append(formatCount(n) + " views") }
-        if let faves = story.voteCount, let n = Int(faves), n > 0 { parts.append(formatCount(n) + " faves") }
-        return parts.joined(separator: " · ")
-    }
-
-    // Line 2: context — date, category, series info
-    private var secondaryMetadata: String {
-        var parts: [String] = []
-        if let date = story.dateApprove { parts.append(formatDate(date)) }
-        if let cat = story.category { parts.append(cat.capitalized) }
         if let chapters = story.chapterCount, chapters > 0 { parts.append("\(chapters) parts") }
         else if story.isSeries == true { parts.append("Series") }
         return parts.joined(separator: " · ")
+    }
+
+    // date · author
+    private var secondaryMetadata: String {
+        var parts: [String] = []
+        if let date = story.dateApprove { parts.append(formatDate(date)) }
+        if let author = story.authorName { parts.append(author) }
+        return parts.joined(separator: " · ")
+    }
+
+    private func formatCategory(_ slug: String) -> String {
+        slug.replacingOccurrences(of: "-", with: " ").capitalized
     }
 
     private func formatCount(_ n: Int) -> String {

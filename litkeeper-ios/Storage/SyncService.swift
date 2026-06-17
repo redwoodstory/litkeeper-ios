@@ -1,5 +1,6 @@
 import Foundation
 import SwiftData
+import UIKit
 
 @Observable
 @MainActor
@@ -21,14 +22,14 @@ final class SyncService {
 
     // MARK: - Cover Sync
 
-    func syncCovers(for stories: [Story], serverURL: String, token: String, proxyAuthToken: String? = nil) async {
+    func syncCovers(for stories: [Story], serverURL: String, token: String, proxyAuthToken: String? = nil, modelContext: ModelContext) async {
         guard !serverURL.isEmpty, !token.isEmpty, !isSyncingCovers else { return }
         isSyncingCovers = true
         defer { isSyncingCovers = false }
 
         let base = serverURL.hasSuffix("/") ? String(serverURL.dropLast()) : serverURL
 
-        var pending: [(filename: String, remoteURL: URL)] = []
+        var pending: [(storyID: Int, filename: String, remoteURL: URL)] = []
         for story in stories {
             let filename = story.cover ?? "\(story.id)_\(story.filenameBase).jpg"
             let localURL = DownloadManager.shared.localCoverURL(filename: filename)
@@ -45,7 +46,7 @@ final class SyncService {
             }
 
             guard let remoteURL = URL(string: "\(base)/api/story/\(story.id)/cover") else { continue }
-            pending.append((filename, remoteURL))
+            pending.append((story.id, filename, remoteURL))
         }
 
         let batches = stride(from: 0, to: pending.count, by: 5).map {
@@ -55,8 +56,9 @@ final class SyncService {
             if index > 0 {
                 try? await Task.sleep(nanoseconds: 500_000_000) // 500ms between batches
             }
-            await withTaskGroup(of: (String, Data)?.self) { group in
+            await withTaskGroup(of: (Int, String, Data)?.self) { group in
                 for item in batch {
+                    let capturedStoryID = item.storyID
                     let capturedFilename = item.filename
                     let capturedURL = item.remoteURL
                     let capturedToken = token
@@ -67,15 +69,24 @@ final class SyncService {
                         if let tok = capturedProxyToken { request.setValue(tok, forHTTPHeaderField: "X-Auth-Token") }
                         guard let (data, response) = try? await URLSession.shared.data(for: request),
                               let http = response as? HTTPURLResponse,
-                              http.statusCode == 200 else { return nil }
-                        return (capturedFilename, data)
+                              http.statusCode == 200,
+                              UIImage(data: data) != nil else { return nil }
+                        return (capturedStoryID, capturedFilename, data)
                     }
                 }
                 for await result in group {
-                    guard let (filename, data) = result else { continue }
+                    guard let (storyID, filename, data) = result else { continue }
                     let localURL = DownloadManager.shared.localCoverURL(filename: filename)
-                    try? data.write(to: localURL)
+                    try? data.write(to: localURL, options: .atomic)
                     localCoverFilenames.insert(filename)
+                    // Keep coverLocalPath in sync so all views resolve to this file
+                    let sid = storyID
+                    if let record = (try? modelContext.fetch(
+                        FetchDescriptor<LocalStory>(predicate: #Predicate { $0.storyID == sid })
+                    ))?.first {
+                        record.coverLocalPath = filename
+                        try? modelContext.save()
+                    }
                 }
             }
         }
@@ -137,19 +148,19 @@ final class SyncService {
 
                 if let b64 = content.epub, let filename = content.epubFilename,
                    let data = Data(base64Encoded: b64) {
-                    try? data.write(to: dm.localEPUBURL(storyID: story.id, filenameBase: story.filenameBase))
+                    try? data.write(to: dm.localEPUBURL(storyID: story.id, filenameBase: story.filenameBase), options: .atomic)
                     epubPath = filename
                 }
 
                 if let b64 = content.html, let filename = content.htmlFilename,
                    let data = Data(base64Encoded: b64) {
-                    try? data.write(to: dm.localHTMLURL(storyID: story.id, filenameBase: story.filenameBase))
+                    try? data.write(to: dm.localHTMLURL(storyID: story.id, filenameBase: story.filenameBase), options: .atomic)
                     htmlPath = filename
                 }
 
                 if let b64 = content.cover, let filename = content.coverFilename,
                    let data = Data(base64Encoded: b64) {
-                    try? data.write(to: dm.localCoverURL(filename: filename))
+                    try? data.write(to: dm.localCoverURL(filename: filename), options: .atomic)
                     coverPath = filename
                     localCoverFilenames.insert(filename)
                 }
@@ -325,7 +336,7 @@ final class SyncService {
               let http = response as? HTTPURLResponse,
               http.statusCode == 200 else { return }
 
-        try? data.write(to: localURL)
+        try? data.write(to: localURL, options: .atomic)
         localCoverFilenames.insert(coverFilename)
         print("[LK-Sync] ✓ Cover resynced: \(coverFilename)")
     }

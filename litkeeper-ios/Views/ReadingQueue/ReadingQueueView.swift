@@ -37,6 +37,7 @@ struct ReadingQueueView: View {
                                     story: story,
                                     readingProgress: viewModel.progressByStoryID[story.id],
                                     coverURL: coverURL(for: story),
+                                    fallbackURL: DownloadManager.shared.remoteCoverURL(storyID: story.id, serverURL: appState.serverURL),
                                     token: appState.apiToken,
                                     proxyAuthToken: appState.proxyAuthToken
                                 )
@@ -100,11 +101,8 @@ struct ReadingQueueView: View {
     }
 
     private func coverURL(for story: Story) -> URL? {
-        let filename = story.cover ?? "\(story.id)_\(story.filenameBase).jpg"
-        let localURL = DownloadManager.shared.localCoverURL(filename: filename)
-        if FileManager.default.fileExists(atPath: localURL.path) {
-            return localURL
-        }
+        let local = localStories.first { $0.storyID == story.id }
+        if let url = DownloadManager.shared.resolveCoverURL(for: story, localStory: local) { return url }
         guard !appState.serverURL.isEmpty else { return nil }
         let base = appState.serverURL.hasSuffix("/") ? String(appState.serverURL.dropLast()) : appState.serverURL
         return URL(string: "\(base)/api/story/\(story.id)/cover")

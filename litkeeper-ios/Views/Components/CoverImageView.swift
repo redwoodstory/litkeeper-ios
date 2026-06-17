@@ -2,6 +2,7 @@ import SwiftUI
 
 struct CoverImageView: View {
     let url: URL?
+    var fallbackURL: URL? = nil
     let title: String
     let author: String
     var token: String = ""
@@ -41,18 +42,25 @@ struct CoverImageView: View {
         guard let url else { return }
         print("[LK-IMG] → \(url.lastPathComponent)")
 
-        // Local file — read directly without HTTP
         if url.isFileURL {
-            guard let data = try? Data(contentsOf: url),
-                  let img = UIImage(data: data) else {
-                print("[LK-IMG] ✗ Could not read local file \(url.lastPathComponent)")
+            if let data = try? Data(contentsOf: url), let img = UIImage(data: data) {
+                print("[LK-IMG] ← \(url.lastPathComponent) (local, \(data.count)B)")
+                loadedImage = img
                 return
             }
-            print("[LK-IMG] ← \(url.lastPathComponent) (local, \(data.count)B)")
-            loadedImage = img
+            // Local file unreadable or not a valid image — delete it so it gets re-downloaded
+            print("[LK-IMG] ✗ Could not read local file \(url.lastPathComponent) — removing corrupt file")
+            try? FileManager.default.removeItem(at: url)
+            if let fallback = fallbackURL {
+                await loadRemote(url: fallback)
+            }
             return
         }
 
+        await loadRemote(url: url)
+    }
+
+    private func loadRemote(url: URL) async {
         var request = URLRequest(url: url)
         if !token.isEmpty {
             request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")

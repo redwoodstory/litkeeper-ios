@@ -4,6 +4,7 @@ struct ReadingQueueRow: View {
     let story: Story
     let readingProgress: Double?  // 0-1 scale from server
     let coverURL: URL?
+    var fallbackURL: URL? = nil
     let token: String
     var proxyAuthToken: String = ""
 
@@ -39,7 +40,7 @@ struct ReadingQueueRow: View {
 
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
-            CoverImageView(url: coverURL, title: story.title, author: story.author, token: token, proxyAuthToken: proxyAuthToken)
+            CoverImageView(url: coverURL, fallbackURL: fallbackURL, title: story.title, author: story.author, token: token, proxyAuthToken: proxyAuthToken)
                 .frame(width: 60, height: 90)
                 .clipShape(RoundedRectangle(cornerRadius: 8))
                 .shadow(color: .black.opacity(0.15), radius: 3, x: 0, y: 1)

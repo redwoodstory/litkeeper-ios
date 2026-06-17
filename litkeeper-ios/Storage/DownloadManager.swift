@@ -40,6 +40,37 @@ final class DownloadManager {
         coversDirectory.appendingPathComponent(filename)
     }
 
+    func remoteCoverURL(storyID: Int, serverURL: String) -> URL? {
+        guard !serverURL.isEmpty else { return nil }
+        let base = serverURL.hasSuffix("/") ? String(serverURL.dropLast()) : serverURL
+        return URL(string: "\(base)/api/story/\(storyID)/cover")
+    }
+
+    /// Single source of truth for resolving a story's cover to the best available local URL.
+    /// Returns nil if no valid local file exists — caller should append a remote URL fallback.
+    func resolveCoverURL(for story: Story, localStory: LocalStory?) -> URL? {
+        // 1. coverLocalPath — set by downloadStory / syncContent, most authoritative
+        if let path = localStory?.coverLocalPath {
+            let url = coversDirectory.appendingPathComponent(path)
+            if isUsableFile(at: url) { return url }
+        }
+        // 2. Deterministic name — always written by downloadStory
+        let deterministic = localCoverURL(storyID: story.id, filenameBase: story.filenameBase)
+        if isUsableFile(at: deterministic) { return deterministic }
+        // 3. story.cover filename — written by syncCovers when story.cover is non-nil
+        if let cover = story.cover {
+            let byCover = localCoverURL(filename: cover)
+            if isUsableFile(at: byCover) { return byCover }
+        }
+        return nil
+    }
+
+    /// Returns true only if the file exists and is non-empty (guards against 0-byte stubs from interrupted downloads).
+    private func isUsableFile(at url: URL) -> Bool {
+        let size = (try? url.resourceValues(forKeys: [.fileSizeKey]))?.fileSize ?? 0
+        return size > 0
+    }
+
     func epubExists(storyID: Int, filenameBase: String) -> Bool {
         FileManager.default.fileExists(atPath: localEPUBURL(storyID: storyID, filenameBase: filenameBase).path)
     }

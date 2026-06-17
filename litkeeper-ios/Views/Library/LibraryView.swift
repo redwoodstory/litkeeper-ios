@@ -81,6 +81,7 @@ struct LibraryView: View {
                                         isInQueue: story.inQueue || localQueuedIDs.contains(story.id),
                                         isFavorited: story.rating == 5 || localFavoritedIDs.contains(story.id),
                                         coverURL: coverURL(for: story),
+                                        fallbackURL: DownloadManager.shared.remoteCoverURL(storyID: story.id, serverURL: appState.serverURL),
                                         token: appState.apiToken,
                                         proxyAuthToken: appState.proxyAuthToken,
                                         showCategory: showCategoryLabel
@@ -103,7 +104,7 @@ struct LibraryView: View {
                         HapticManager.shared.notify(.success)
                         syncService.syncQueueStatus(for: viewModel.stories, modelContext: modelContext)
                         cardsAppeared = false
-                        Task { await syncService.syncCovers(for: viewModel.stories, serverURL: appState.serverURL, token: appState.apiToken, proxyAuthToken: appState.proxyAuthToken) }
+                        Task { await syncService.syncCovers(for: viewModel.stories, serverURL: appState.serverURL, token: appState.apiToken, proxyAuthToken: appState.proxyAuthToken, modelContext: modelContext) }
                         Task { await syncService.syncContent(for: viewModel.stories, serverURL: appState.serverURL, token: appState.apiToken, proxyAuthToken: appState.proxyAuthToken, modelContext: modelContext, localStories: localStories) }
                         Task { await syncService.syncHighlights(appState: appState, modelContext: modelContext) }
                         try? await Task.sleep(for: .milliseconds(50))
@@ -170,7 +171,7 @@ struct LibraryView: View {
             await viewModel.refresh(appState: appState, silent: true)
             syncService.syncQueueStatus(for: viewModel.stories, modelContext: modelContext)
             Task { await syncService.syncMetadata(appState: appState, modelContext: modelContext) }
-            Task { await syncService.syncCovers(for: viewModel.stories, serverURL: appState.serverURL, token: appState.apiToken, proxyAuthToken: appState.proxyAuthToken) }
+            Task { await syncService.syncCovers(for: viewModel.stories, serverURL: appState.serverURL, token: appState.apiToken, proxyAuthToken: appState.proxyAuthToken, modelContext: modelContext) }
             Task { await syncService.syncContent(for: viewModel.stories, serverURL: appState.serverURL, token: appState.apiToken, proxyAuthToken: appState.proxyAuthToken, modelContext: modelContext, localStories: localStories) }
             Task { await syncService.syncHighlights(appState: appState, modelContext: modelContext) }
         }
@@ -201,14 +202,8 @@ struct LibraryView: View {
     }
 
     private func coverURL(for story: Story) -> URL? {
-        // 1. Deterministic path — always used by downloadStory
-        let deterministic = DownloadManager.shared.localCoverURL(storyID: story.id, filenameBase: story.filenameBase)
-        if FileManager.default.fileExists(atPath: deterministic.path) { return deterministic }
-        // 2. Server-provided cover filename — used by syncCovers when story.cover != nil
-        if let cover = story.cover {
-            let byCoverField = DownloadManager.shared.localCoverURL(filename: cover)
-            if FileManager.default.fileExists(atPath: byCoverField.path) { return byCoverField }
-        }
+        let local = localStories.first { $0.storyID == story.id }
+        if let url = DownloadManager.shared.resolveCoverURL(for: story, localStory: local) { return url }
         guard !appState.serverURL.isEmpty else { return nil }
         let base = appState.serverURL.hasSuffix("/") ? String(appState.serverURL.dropLast()) : appState.serverURL
         return URL(string: "\(base)/api/story/\(story.id)/cover")

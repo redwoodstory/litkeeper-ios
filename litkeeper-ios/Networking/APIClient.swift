@@ -382,7 +382,7 @@ actor APIClient {
 
     func browseCustomList(
         category: String, sort: String, page: Int,
-        minScore: Double, minViews: Int, series: String, dateRange: String
+        minScore: Double, minViews: Int, minFaves: Int, series: String, dateRange: String
     ) async throws -> BrowseResult {
         let path = queryPath("/api/browse/custom_list", params: [
             ("category", category),
@@ -390,10 +390,26 @@ actor APIClient {
             ("page", "\(page)"),
             ("min_score", String(format: "%.1f", minScore)),
             ("min_views", "\(minViews)"),
+            ("min_faves", "\(minFaves)"),
             ("series", series),
             ("date_range", dateRange)
         ])
-        return try decode(BrowseResult.self, from: try await get(path))
+        print("[browseCustomList] URL: \(path)")
+        let data = try await get(path)
+        let result = try decode(BrowseResult.self, from: data)
+        let lowFaves = result.stories.filter { s in
+            if let v = s.voteCount, let n = Int(v) { return n < minFaves }
+            return minFaves > 0
+        }
+        if !lowFaves.isEmpty {
+            print("[browseCustomList] WARNING: \(lowFaves.count) stories returned with faves below min_faves=\(minFaves):")
+            for s in lowFaves.prefix(5) {
+                print("  - \"\(s.title)\" voteCount=\(s.voteCount ?? "nil")")
+            }
+        } else {
+            print("[browseCustomList] OK: all \(result.stories.count) stories have faves >= \(minFaves)")
+        }
+        return result
     }
 
     func queueBrowseStories(urls: [String]) async throws {
