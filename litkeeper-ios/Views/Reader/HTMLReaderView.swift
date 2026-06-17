@@ -525,13 +525,9 @@ struct HTMLReaderView: View {
             if showRateStoryModal {
                 RateStoryModalView(
                     story: story,
-                    appState: appState,
                     isPresented: $showRateStoryModal
                 ) { newRating in
-                    if let localStory {
-                        localStory.rating = newRating
-                        try? modelContext.save()
-                    }
+                    enqueueRatingOp(rating: newRating)
                 }
                 .transition(.opacity.combined(with: .scale(scale: 0.95)))
                 .zIndex(10)
@@ -629,14 +625,8 @@ struct HTMLReaderView: View {
                 .padding(.top, 4)
 
             RatingView(rating: headerRating) { newRating in
-                let value = newRating == 0 ? nil : Optional(newRating)
-                headerRating = value
-                if let localStory {
-                    localStory.rating = value
-                    try? modelContext.save()
-                }
-                let storyID = story.id
-                Task { try? await appState.makeAPIClient().updateRating(storyID: storyID, rating: newRating) }
+                headerRating = newRating == 0 ? nil : Optional(newRating)
+                enqueueRatingOp(rating: newRating)
             }
         }
         .padding(24)
@@ -728,6 +718,25 @@ struct HTMLReaderView: View {
     }
 
     // MARK: - Content loading
+
+    private func enqueueRatingOp(rating: Int?) {
+        guard let localStory else { return }
+        localStory.rating = (rating == 0 || rating == nil) ? nil : rating
+        let storyID = story.id
+        let existing = (try? modelContext.fetch(
+            FetchDescriptor<PendingOperation>(predicate: #Predicate { $0.storyID == storyID && $0.operationType == "rating" })
+        ))?.first
+        let op: PendingOperation
+        if let existing {
+            op = existing
+        } else {
+            op = PendingOperation(storyID: storyID, operationType: "rating")
+            modelContext.insert(op)
+        }
+        op.rating = rating ?? 0
+        try? modelContext.save()
+        Task { await syncService.flushPendingOperations(appState: appState, modelContext: modelContext) }
+    }
 
     private func saveQuote(chapterIndex: Int, paragraphIndex: Int, rawHTML: String) async {
         let text = rawHTML

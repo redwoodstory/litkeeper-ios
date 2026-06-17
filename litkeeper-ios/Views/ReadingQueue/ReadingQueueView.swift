@@ -36,6 +36,7 @@ struct ReadingQueueView: View {
                                 ReadingQueueRow(
                                     story: story,
                                     readingProgress: viewModel.progressByStoryID[story.id],
+                                    localRating: localStories.first(where: { $0.storyID == story.id })?.rating,
                                     coverURL: coverURL(for: story),
                                     fallbackURL: DownloadManager.shared.remoteCoverURL(storyID: story.id, serverURL: appState.serverURL),
                                     token: appState.apiToken,

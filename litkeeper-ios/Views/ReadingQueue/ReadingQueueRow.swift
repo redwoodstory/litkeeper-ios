@@ -3,6 +3,7 @@ import SwiftUI
 struct ReadingQueueRow: View {
     let story: Story
     let readingProgress: Double?  // 0-1 scale from server
+    var localRating: Int? = nil
     let coverURL: URL?
     var fallbackURL: URL? = nil
     let token: String
@@ -100,7 +101,8 @@ struct ReadingQueueRow: View {
                     .padding(.top, 2)
                 }
 
-                if let rating = story.rating {
+                let effectiveRating = localRating ?? story.rating
+                if let rating = effectiveRating {
                     HStack(spacing: 2) {
                         ForEach(1...5, id: \.self) { i in
                             Image(systemName: i <= rating ? "star.fill" : "star")

@@ -80,6 +80,7 @@ struct LibraryView: View {
                                         isDownloaded: viewModel.isDownloaded(story),
                                         isInQueue: story.inQueue || localQueuedIDs.contains(story.id),
                                         isFavorited: story.rating == 5 || localFavoritedIDs.contains(story.id),
+                                        localRating: localStories.first(where: { $0.storyID == story.id })?.rating,
                                         coverURL: coverURL(for: story),
                                         fallbackURL: DownloadManager.shared.remoteCoverURL(storyID: story.id, serverURL: appState.serverURL),
                                         token: appState.apiToken,

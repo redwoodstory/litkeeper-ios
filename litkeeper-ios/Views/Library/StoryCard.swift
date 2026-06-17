@@ -5,6 +5,7 @@ struct StoryCard: View {
     let isDownloaded: Bool
     var isInQueue: Bool = false
     var isFavorited: Bool = false
+    var localRating: Int? = nil
     let coverURL: URL?
     var fallbackURL: URL? = nil
     var token: String = ""
@@ -30,7 +31,7 @@ struct StoryCard: View {
             }
 
             HStack(spacing: 2) {
-                let rating = story.rating ?? 0
+                let rating = localRating ?? story.rating ?? 0
                 ForEach(1...5, id: \.self) { i in
                     Image(systemName: i <= rating ? "star.fill" : "star")
                         .font(.caption2)

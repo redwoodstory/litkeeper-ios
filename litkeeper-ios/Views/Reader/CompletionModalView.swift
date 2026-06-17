@@ -2,15 +2,13 @@ import SwiftUI
 
 struct RateStoryModalView: View {
     let story: Story
-    let appState: AppState
     @Binding var isPresented: Bool
     let onRatingChanged: (Int?) -> Void
 
     @State private var currentRating: Int?
 
-    init(story: Story, appState: AppState, isPresented: Binding<Bool>, onRatingChanged: @escaping (Int?) -> Void) {
+    init(story: Story, isPresented: Binding<Bool>, onRatingChanged: @escaping (Int?) -> Void) {
         self.story = story
-        self.appState = appState
         self._isPresented = isPresented
         self.onRatingChanged = onRatingChanged
         _currentRating = State(initialValue: story.rating)
@@ -37,8 +35,6 @@ struct RateStoryModalView: View {
                 let value = newRating == 0 ? nil : Optional(newRating)
                 currentRating = value
                 onRatingChanged(value)
-                let storyID = story.id
-                Task { try? await appState.makeAPIClient().updateRating(storyID: storyID, rating: newRating) }
                 Task {
                     try? await Task.sleep(for: .milliseconds(350))
                     await MainActor.run { isPresented = false }
