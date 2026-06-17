@@ -10,33 +10,52 @@ struct ReadingQueueRow: View {
     var proxyToken: String = ""
 
     private var relativeQueueDate: String? {
-        guard let raw = story.queuedAt else { return nil }
-        let date = Self.parseDate(raw)
-        guard let date else { return nil }
+        guard let raw = story.queuedAt, let date = Self.parseDate(raw) else { return nil }
         let seconds = Date().timeIntervalSince(date)
         if seconds < 60 { return "just now" }
         if seconds < 3600 { let m = Int(seconds / 60); return "\(m) minute\(m == 1 ? "" : "s") ago" }
         if seconds < 86400 { let h = Int(seconds / 3600); return "\(h) hour\(h == 1 ? "" : "s") ago" }
         if seconds < 604800 { let d = Int(seconds / 86400); return "\(d) day\(d == 1 ? "" : "s") ago" }
-        let f = DateFormatter(); f.dateFormat = "MMM d, yyyy"
-        return f.string(from: date)
+        return Self.displayFormatter.string(from: date)
     }
 
+    private static let displayFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "MMM d, yyyy"
+        return f
+    }()
+
+    private static let iso8601WithFractional: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return f
+    }()
+
+    private static let iso8601Plain: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime]
+        return f
+    }()
+
+    private static let microsecondFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.dateFormat = "yyyy-MM-dd'T'HH:mm:ss.SSSSSS"
+        return f
+    }()
+
+    private static let secondFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.dateFormat = "yyyy-MM-dd'T'HH:mm:ss"
+        return f
+    }()
+
     private static func parseDate(_ raw: String) -> Date? {
-        let f1 = ISO8601DateFormatter()
-        f1.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        if let d = f1.date(from: raw) { return d }
-        let f2 = ISO8601DateFormatter()
-        f2.formatOptions = [.withInternetDateTime]
-        if let d = f2.date(from: raw) { return d }
-        let f3 = DateFormatter()
-        f3.locale = Locale(identifier: "en_US_POSIX")
-        f3.dateFormat = "yyyy-MM-dd'T'HH:mm:ss.SSSSSS"
-        if let d = f3.date(from: raw) { return d }
-        let f4 = DateFormatter()
-        f4.locale = Locale(identifier: "en_US_POSIX")
-        f4.dateFormat = "yyyy-MM-dd'T'HH:mm:ss"
-        return f4.date(from: raw)
+        iso8601WithFractional.date(from: raw)
+            ?? iso8601Plain.date(from: raw)
+            ?? microsecondFormatter.date(from: raw)
+            ?? secondFormatter.date(from: raw)
     }
 
     var body: some View {
@@ -101,21 +120,11 @@ struct ReadingQueueRow: View {
                 }
 
                 if !story.tags.isEmpty {
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing: 4) {
-                            ForEach(story.tags, id: \.self) { tag in
-                                Text(tag)
-                                    .font(.caption2)
-                                    .lineLimit(1)
-                                    .fixedSize()
-                                    .padding(.horizontal, 6)
-                                    .padding(.vertical, 2)
-                                    .background(Capsule().fill(Color.secondary.opacity(0.15)))
-                                    .foregroundStyle(.secondary)
-                            }
-                        }
-                    }
-                    .padding(.top, 2)
+                    Text(story.tags.prefix(4).joined(separator: " · "))
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .padding(.top, 2)
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)

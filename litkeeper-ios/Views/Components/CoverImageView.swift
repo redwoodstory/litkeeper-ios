@@ -1,5 +1,14 @@
 import SwiftUI
 
+private enum ImageCache {
+    static let shared: NSCache<NSString, UIImage> = {
+        let cache = NSCache<NSString, UIImage>()
+        cache.countLimit = 300
+        cache.totalCostLimit = 50 * 1024 * 1024  // 50 MB
+        return cache
+    }()
+}
+
 struct CoverImageView: View {
     let url: URL?
     var fallbackURL: URL? = nil
@@ -62,6 +71,12 @@ struct CoverImageView: View {
     }
 
     private func loadRemote(url: URL) async {
+        let cacheKey = url.absoluteString as NSString
+        if let cached = ImageCache.shared.object(forKey: cacheKey) {
+            loadedImage = cached
+            return
+        }
+
         var request = URLRequest(url: url)
         if !token.isEmpty {
             request.setValue(token, forHTTPHeaderField: "X-Api-Key")
@@ -81,6 +96,7 @@ struct CoverImageView: View {
             print("[LK-IMG] ✗ Invalid image data for \(url.lastPathComponent) (\(data.count)B)")
             return
         }
+        ImageCache.shared.setObject(img, forKey: cacheKey, cost: data.count)
         print("[LK-IMG] ← \(url.lastPathComponent) (\(data.count)B)")
         loadedImage = img
     }

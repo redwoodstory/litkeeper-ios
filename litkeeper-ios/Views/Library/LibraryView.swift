@@ -93,7 +93,7 @@ struct LibraryView: View {
                                 .offset(y: cardsAppeared ? 0 : 12)
                                 .animation(
                                     .spring(response: 0.4, dampingFraction: 0.8)
-                                        .delay(Double(min(index, 20)) * 0.03),
+                                        .delay(Double(min(index, 8)) * 0.03),
                                     value: cardsAppeared
                                 )
                             }
@@ -103,7 +103,7 @@ struct LibraryView: View {
                     .refreshable {
                         await viewModel.refresh(appState: appState)
                         HapticManager.shared.notify(.success)
-                        syncService.syncQueueStatus(for: viewModel.stories, modelContext: modelContext)
+                        await syncService.syncQueueStatus(for: viewModel.stories, modelContext: modelContext)
                         cardsAppeared = false
                         Task { await syncService.syncCovers(for: viewModel.stories, serverURL: appState.serverURL, token: appState.apiToken, proxyTokenId: appState.proxyTokenId,
                                         proxyToken: appState.proxyToken, modelContext: modelContext) }
@@ -172,13 +172,21 @@ struct LibraryView: View {
             viewModel.updateDownloadedIDs(from: localStories)
             viewModel.loadLocalData(localStories: localStories)
             await viewModel.refresh(appState: appState, silent: true)
-            syncService.syncQueueStatus(for: viewModel.stories, modelContext: modelContext)
+            // Queue status runs async so the UI is never blocked
+            Task { await syncService.syncQueueStatus(for: viewModel.stories, modelContext: modelContext) }
             Task { await syncService.syncMetadata(appState: appState, modelContext: modelContext) }
-            Task { await syncService.syncCovers(for: viewModel.stories, serverURL: appState.serverURL, token: appState.apiToken, proxyTokenId: appState.proxyTokenId,
-                                        proxyToken: appState.proxyToken, modelContext: modelContext) }
-            Task { await syncService.syncContent(for: viewModel.stories, serverURL: appState.serverURL, token: appState.apiToken, proxyTokenId: appState.proxyTokenId,
-                                        proxyToken: appState.proxyToken, modelContext: modelContext, localStories: localStories) }
             Task { await syncService.syncHighlights(appState: appState, modelContext: modelContext) }
+            // Delay heavier syncs so the grid can render before background I/O starts
+            Task {
+                try? await Task.sleep(for: .seconds(1))
+                await syncService.syncCovers(for: viewModel.stories, serverURL: appState.serverURL, token: appState.apiToken, proxyTokenId: appState.proxyTokenId,
+                                    proxyToken: appState.proxyToken, modelContext: modelContext)
+            }
+            Task {
+                try? await Task.sleep(for: .seconds(2))
+                await syncService.syncContent(for: viewModel.stories, serverURL: appState.serverURL, token: appState.apiToken, proxyTokenId: appState.proxyTokenId,
+                                    proxyToken: appState.proxyToken, modelContext: modelContext, localStories: localStories)
+            }
         }
         .task {
             // Periodic library + metadata sync — fires every 5 minutes while the view is active

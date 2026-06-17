@@ -24,9 +24,13 @@ private struct ShimmerModifier: ViewModifier {
                 .clipped()
             )
             .onAppear {
+                phase = -1
                 withAnimation(.linear(duration: 1.4).repeatForever(autoreverses: false)) {
                     phase = 1
                 }
+            }
+            .onDisappear {
+                phase = -1
             }
     }
 }

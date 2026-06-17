@@ -201,7 +201,7 @@ final class SyncService {
     /// Syncs queue status and metadata for all stories from the server.
     /// Creates LocalStory records for queued stories that haven't been downloaded yet,
     /// and updates metadata on all existing records so rich data is available offline.
-    func syncQueueStatus(for stories: [Story], modelContext: ModelContext) {
+    func syncQueueStatus(for stories: [Story], modelContext: ModelContext) async {
         guard let localStories = try? modelContext.fetch(FetchDescriptor<LocalStory>()) else { return }
         var localByID = Dictionary(uniqueKeysWithValues: localStories.map { ($0.storyID, $0) })
 
@@ -220,7 +220,10 @@ final class SyncService {
             return Set(ops.map { $0.storyID })
         }()
 
-        for story in stories {
+        for (i, story) in stories.enumerated() {
+            if i > 0 && i.isMultiple(of: 50) {
+                await Task.yield()
+            }
             if let local = localByID[story.id] {
                 // Only update queue flag if there's no pending local change waiting to sync
                 if !pendingQueueIDs.contains(story.id) {

@@ -25,8 +25,9 @@ actor APIClient {
         self.token = token
         self.proxyTokenId = proxyTokenId
         self.proxyToken = proxyToken
-        let config = URLSessionConfiguration.ephemeral
+        let config = URLSessionConfiguration.default
         config.timeoutIntervalForRequest = 30
+        config.urlCache = URLCache(memoryCapacity: 20 * 1024 * 1024, diskCapacity: 100 * 1024 * 1024)
         self.session = URLSession(configuration: config)
     }
 

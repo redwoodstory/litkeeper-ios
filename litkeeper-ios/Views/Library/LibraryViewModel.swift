@@ -4,7 +4,7 @@ import Observation
 
 @Observable
 final class LibraryViewModel {
-    var stories: [Story] = []
+    var stories: [Story] = [] { didSet { _recomputeFiltered() } }
     var isLoading = false
     var errorMessage: String? = nil
     var isShowingCachedData = false
@@ -12,12 +12,12 @@ final class LibraryViewModel {
 
     private static let cacheKey = "cachedLibraryStories"
 
-    // Filter/sort state
-    var searchText = ""
-    var selectedCategory: String? = nil
-    var sortBy: SortOption = .dateAdded
-    var sortAscending = false
-    var showQueueOnly = false
+    // Filter/sort state — each setter triggers a filteredStories recompute
+    var searchText = "" { didSet { _recomputeFiltered() } }
+    var selectedCategory: String? = nil { didSet { _recomputeFiltered() } }
+    var sortBy: SortOption = .dateAdded { didSet { _recomputeFiltered() } }
+    var sortAscending = false { didSet { _recomputeFiltered() } }
+    var showQueueOnly = false { didSet { _recomputeFiltered() } }
 
     enum SortOption: String, CaseIterable, Identifiable {
         case dateAdded = "Date Added"
@@ -32,7 +32,10 @@ final class LibraryViewModel {
     // Set of downloaded story IDs — merged from SwiftData
     var downloadedStoryIDs: Set<Int> = []
 
-    var filteredStories: [Story] {
+    // Cached result — recomputed only when stories or filter/sort state changes
+    private(set) var filteredStories: [Story] = []
+
+    func _recomputeFiltered() {
         var result = stories
 
         if !searchText.isEmpty {
@@ -45,7 +48,7 @@ final class LibraryViewModel {
             result = result.filter { $0.category == cat }
         }
         if showQueueOnly {
-            result = result.filter { $0.inQueue }
+            result = result.filter { $0.inQueue == true }
         }
 
         result.sort { a, b in
@@ -56,7 +59,6 @@ final class LibraryViewModel {
                     ? (a.dateAdded ?? "") < (b.dateAdded ?? "")
                     : (a.dateAdded ?? "") > (b.dateAdded ?? "")
             case .lastOpened:
-                // Stories never opened (nil) should appear last when descending (most recent first)
                 let aDate = a.lastOpenedAt ?? ""
                 let bDate = b.lastOpenedAt ?? ""
                 if aDate.isEmpty && bDate.isEmpty { return false }
@@ -78,7 +80,7 @@ final class LibraryViewModel {
             }
         }
 
-        return result
+        filteredStories = result
     }
 
     var availableCategories: [String] {
@@ -115,7 +117,9 @@ final class LibraryViewModel {
             let fetched = try await client.fetchLibrary()
             stories = fetched
             isShowingCachedData = false
-            saveCache(fetched)
+            Task.detached(priority: .background) { [weak self] in
+                self?.saveCache(fetched)
+            }
         } catch let error as APIError {
             switch error {
             case .unauthorized, .notConfigured:
