@@ -115,7 +115,7 @@ final class LibraryViewModel {
         let client = appState.makeAPIClient()
         do {
             let fetched = try await client.fetchLibrary()
-            stories = fetched
+            if fetched != stories { stories = fetched }
             isShowingCachedData = false
             Task.detached(priority: .background) { [weak self] in
                 self?.saveCache(fetched)

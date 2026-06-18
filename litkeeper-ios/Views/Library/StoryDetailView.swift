@@ -514,7 +514,7 @@ struct StoryDetailView: View {
             $0.inQueue = inQueue
             $0.queuedAt = timestamp
         }
-        Task { await syncService.flushPendingOperations(appState: appState, modelContext: modelContext) }
+        Task { await syncService.flushPendingOperations(serverURL: appState.serverURL, token: appState.apiToken, proxyTokenId: appState.proxyTokenId, proxyToken: appState.proxyToken, modelContainer: modelContext.container) }
     }
 
     private func enqueueRatingOp(rating: Int) {
@@ -522,7 +522,7 @@ struct StoryDetailView: View {
             local.rating = rating == 0 ? nil : rating
         }
         upsertPendingOp(type: "rating") { $0.rating = rating }
-        Task { await syncService.flushPendingOperations(appState: appState, modelContext: modelContext) }
+        Task { await syncService.flushPendingOperations(serverURL: appState.serverURL, token: appState.apiToken, proxyTokenId: appState.proxyTokenId, proxyToken: appState.proxyToken, modelContainer: modelContext.container) }
     }
 
     private func upsertPendingOp(type: String, configure: (PendingOperation) -> Void) {

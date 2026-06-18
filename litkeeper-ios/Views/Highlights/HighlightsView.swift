@@ -46,7 +46,7 @@ struct HighlightsView: View {
     }
 
     private func syncHighlights() async {
-        await syncService.syncHighlights(appState: appState, modelContext: modelContext)
+        await syncService.syncHighlights(serverURL: appState.serverURL, token: appState.apiToken, proxyTokenId: appState.proxyTokenId, proxyToken: appState.proxyToken, modelContainer: modelContext.container)
     }
 
     private func remove(_ h: LocalHighlight) async {

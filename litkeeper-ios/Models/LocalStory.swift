@@ -53,36 +53,48 @@ final class LocalStory {
     var hasEPUB: Bool { epubLocalPath != nil }
     var hasHTML: Bool { htmlLocalPath != nil }
 
-    /// Updates all server-sourced metadata fields from a Story value.
-    func updateMetadata(from story: Story) {
-        title = story.title
-        author = story.author
-        filenameBase = story.filenameBase
-        coverFilename = story.cover
-        authorURL = story.authorURL
-        category = story.category
-        tags = story.tags
-        sourceURL = story.sourceURL
-        wordCount = story.wordCount
-        chapterCount = story.chapterCount
-        pageCount = story.pageCount
-        size = story.size
-        rating = story.rating
-        storyDescription = story.description
-        
-        // Parse datetime strings to Date objects
-        let isoFormatter = ISO8601DateFormatter()
-        if let queuedAtStr = story.queuedAt {
-            queuedAt = isoFormatter.date(from: queuedAtStr)
+    private static let isoFormatter: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return f
+    }()
+
+    /// Updates server-sourced metadata fields, writing only values that have changed.
+    @discardableResult
+    func updateMetadata(from story: Story) -> Bool {
+        var changed = false
+        func set<T: Equatable>(_ kp: ReferenceWritableKeyPath<LocalStory, T>, _ value: T) {
+            if self[keyPath: kp] != value { self[keyPath: kp] = value; changed = true }
         }
-        if let lastOpenedAtStr = story.lastOpenedAt {
-            lastOpenedAt = isoFormatter.date(from: lastOpenedAtStr)
+        func setOpt<T: Equatable>(_ kp: ReferenceWritableKeyPath<LocalStory, T?>, _ value: T?) {
+            if self[keyPath: kp] != value { self[keyPath: kp] = value; changed = true }
         }
+        set(\.title, story.title)
+        set(\.author, story.author)
+        set(\.filenameBase, story.filenameBase)
+        setOpt(\.coverFilename, story.cover)
+        setOpt(\.authorURL, story.authorURL)
+        setOpt(\.category, story.category)
+        set(\.tags, story.tags)
+        setOpt(\.sourceURL, story.sourceURL)
+        setOpt(\.wordCount, story.wordCount)
+        setOpt(\.chapterCount, story.chapterCount)
+        setOpt(\.pageCount, story.pageCount)
+        setOpt(\.size, story.size)
+        setOpt(\.rating, story.rating)
+        setOpt(\.storyDescription, story.description)
+
+        let fmt = Self.isoFormatter
+        let newQueuedAt = story.queuedAt.flatMap { fmt.date(from: $0) }
+        let newLastOpenedAt = story.lastOpenedAt.flatMap { fmt.date(from: $0) }
+        setOpt(\.queuedAt, newQueuedAt)
+        setOpt(\.lastOpenedAt, newLastOpenedAt)
+        return changed
     }
 
     /// Constructs a Story value with all available cached metadata.
     var asStory: Story {
-        let isoFormatter = ISO8601DateFormatter()
+        let fmt = Self.isoFormatter
         return Story(
             id: storyID,
             title: title,
@@ -100,10 +112,10 @@ final class LocalStory {
             size: size,
             rating: rating,
             inQueue: inQueue,
-            queuedAt: queuedAt.map { isoFormatter.string(from: $0) },
-            lastOpenedAt: lastOpenedAt.map { isoFormatter.string(from: $0) },
+            queuedAt: queuedAt.map { fmt.string(from: $0) },
+            lastOpenedAt: lastOpenedAt.map { fmt.string(from: $0) },
             description: storyDescription,
-            dateAdded: ISO8601DateFormatter().string(from: downloadedAt),
+            dateAdded: fmt.string(from: downloadedAt),
             updatedAt: nil
         )
     }

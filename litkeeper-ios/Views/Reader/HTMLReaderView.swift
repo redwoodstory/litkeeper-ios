@@ -210,7 +210,7 @@ struct HTMLReaderView: View {
             op.lastOpenedAt = timestamp
             try? modelContext.save()
             
-            Task { await syncService.flushPendingOperations(appState: appState, modelContext: modelContext) }
+            Task { await syncService.flushPendingOperations(serverURL: appState.serverURL, token: appState.apiToken, proxyTokenId: appState.proxyTokenId, proxyToken: appState.proxyToken, modelContainer: modelContext.container) }
         }
         .onChange(of: readerItems.count) { old, new in
             if old == 0 && new > 0 { buildAttrCache() }
@@ -243,7 +243,7 @@ struct HTMLReaderView: View {
             op.progressParagraphID = paragraphID
             try? modelContext.save()
 
-            Task { await syncService.flushPendingOperations(appState: appState, modelContext: modelContext) }
+            Task { await syncService.flushPendingOperations(serverURL: appState.serverURL, token: appState.apiToken, proxyTokenId: appState.proxyTokenId, proxyToken: appState.proxyToken, modelContainer: modelContext.container) }
         }
     }
 
@@ -735,7 +735,7 @@ struct HTMLReaderView: View {
         }
         op.rating = rating ?? 0
         try? modelContext.save()
-        Task { await syncService.flushPendingOperations(appState: appState, modelContext: modelContext) }
+        Task { await syncService.flushPendingOperations(serverURL: appState.serverURL, token: appState.apiToken, proxyTokenId: appState.proxyTokenId, proxyToken: appState.proxyToken, modelContainer: modelContext.container) }
     }
 
     private func saveQuote(chapterIndex: Int, paragraphIndex: Int, rawHTML: String) async {
@@ -750,7 +750,7 @@ struct HTMLReaderView: View {
                 paragraphIndex: paragraphIndex,
                 quoteText: text
             )
-            await syncService.syncHighlights(appState: appState, modelContext: modelContext)
+            await syncService.syncHighlights(serverURL: appState.serverURL, token: appState.apiToken, proxyTokenId: appState.proxyTokenId, proxyToken: appState.proxyToken, modelContainer: modelContext.container)
             HapticManager.shared.notify(.success)
             await MainActor.run { quoteAlertVisible = true }
         } catch {
@@ -783,7 +783,7 @@ struct HTMLReaderView: View {
                 HapticManager.shared.notify(.success)
                 quoteSavedOfflineAlertVisible = true
             }
-            Task { await syncService.flushPendingOperations(appState: appState, modelContext: modelContext) }
+            Task { await syncService.flushPendingOperations(serverURL: appState.serverURL, token: appState.apiToken, proxyTokenId: appState.proxyTokenId, proxyToken: appState.proxyToken, modelContainer: modelContext.container) }
         }
     }
 

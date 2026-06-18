@@ -69,7 +69,9 @@ struct RootView: View {
                 .environment(appState)
         }
         .task {
+            let t = Date()
             DownloadManager.shared.migrateToIDPrefixedFiles(modelContext: modelContext)
+            print("[LK-STARTUP] migrateToIDPrefixedFiles: \(String(format: "%.1f", Date().timeIntervalSince(t)*1000))ms")
         }
     }
 }

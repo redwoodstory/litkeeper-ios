@@ -16,111 +16,18 @@ struct LibraryView: View {
     @State private var showFilterSort = false
     @State private var cardsAppeared = false
 
+    // Derived from @Query — recomputed only when localStories changes, not on every cell render.
+    @State private var localByID: [Int: LocalStory] = [:]
+    @State private var localQueuedIDs: Set<Int> = []
+    @State private var localFavoritedIDs: Set<Int> = []
+
     private let columns = [
         GridItem(.adaptive(minimum: 100, maximum: 140), spacing: 12)
     ]
 
-    // Derived directly from @Query so they update immediately, even while a sheet is open.
-    private var localQueuedIDs: Set<Int> {
-        Set(localStories.filter { $0.inQueue }.map { $0.storyID })
-    }
-    private var localFavoritedIDs: Set<Int> {
-        Set(localStories.filter { ($0.rating ?? 0) >= 5 }.map { $0.storyID })
-    }
-
     var body: some View {
         NavigationStack {
-            Group {
-                if viewModel.isLoading && viewModel.stories.isEmpty {
-                    LibrarySkeletonView()
-                } else if !appState.isConfigured {
-                    EmptyStateView(
-                        icon: "server.rack",
-                        title: "Server Not Configured",
-                        message: "Add your server URL and API token in Settings to get started."
-                    )
-                } else if viewModel.filteredStories.isEmpty {
-                    VStack(spacing: 16) {
-                        EmptyStateView(
-                            icon: viewModel.errorMessage != nil ? "wifi.slash" : "books.vertical",
-                            title: viewModel.errorMessage != nil ? "Server Unreachable" : (viewModel.stories.isEmpty ? "Library Empty" : "No Results"),
-                            message: viewModel.errorMessage != nil
-                                ? "Could not connect to your server. Check your connection or settings."
-                                : (viewModel.stories.isEmpty
-                                    ? "Submit a Literotica URL to download your first story."
-                                    : "Try adjusting your search or filters.")
-                        )
-                        if viewModel.errorMessage != nil || viewModel.stories.isEmpty {
-                            Button {
-                                Task { await viewModel.refresh(appState: appState) }
-                            } label: {
-                                Label("Retry", systemImage: "arrow.clockwise")
-                                    .font(.subheadline)
-                            }
-                            .buttonStyle(.bordered)
-                        }
-                    }
-                } else {
-                    ScrollView {
-                        if viewModel.isShowingCachedData {
-                            Label("Showing last synced library — server unreachable", systemImage: "wifi.slash")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                                .padding(.horizontal)
-                                .padding(.top, 8)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                        }
-                        LazyVGrid(columns: columns, spacing: 16) {
-                            ForEach(Array(viewModel.filteredStories.enumerated()), id: \.element.id) { index, story in
-                                Button {
-                                    selectedStory = story
-                                } label: {
-                                    StoryCard(
-                                        story: story,
-                                        isDownloaded: viewModel.isDownloaded(story),
-                                        isInQueue: story.inQueue || localQueuedIDs.contains(story.id),
-                                        isFavorited: story.rating == 5 || localFavoritedIDs.contains(story.id),
-                                        localRating: localStories.first(where: { $0.storyID == story.id })?.rating,
-                                        coverURL: coverURL(for: story),
-                                        fallbackURL: DownloadManager.shared.remoteCoverURL(storyID: story.id, serverURL: appState.serverURL),
-                                        token: appState.apiToken,
-                                        proxyTokenId: appState.proxyTokenId,
-                                        proxyToken: appState.proxyToken,
-                                        showCategory: showCategoryLabel
-                                    )
-                                }
-                                .buttonStyle(PressScaleButtonStyle())
-                                .opacity(cardsAppeared ? 1 : 0)
-                                .offset(y: cardsAppeared ? 0 : 12)
-                                .animation(
-                                    .spring(response: 0.4, dampingFraction: 0.8)
-                                        .delay(Double(min(index, 8)) * 0.03),
-                                    value: cardsAppeared
-                                )
-                            }
-                        }
-                        .padding()
-                    }
-                    .refreshable {
-                        await viewModel.refresh(appState: appState)
-                        HapticManager.shared.notify(.success)
-                        await syncService.syncQueueStatus(for: viewModel.stories, modelContext: modelContext)
-                        cardsAppeared = false
-                        Task { await syncService.syncCovers(for: viewModel.stories, serverURL: appState.serverURL, token: appState.apiToken, proxyTokenId: appState.proxyTokenId,
-                                        proxyToken: appState.proxyToken, modelContext: modelContext) }
-                        Task { await syncService.syncContent(for: viewModel.stories, serverURL: appState.serverURL, token: appState.apiToken, proxyTokenId: appState.proxyTokenId,
-                                        proxyToken: appState.proxyToken, modelContext: modelContext, localStories: localStories) }
-                        Task { await syncService.syncHighlights(appState: appState, modelContext: modelContext) }
-                        try? await Task.sleep(for: .milliseconds(50))
-                        cardsAppeared = true
-                    }
-                    .onAppear {
-                        guard !cardsAppeared else { return }
-                        cardsAppeared = true
-                    }
-                }
-            }
-            .navigationTitle("LitKeeper")
+            libraryContent
             .searchable(text: $viewModel.searchText, prompt: "Search title or author")
             .toolbar {
                 ToolbarItemGroup(placement: .navigationBarTrailing) {
@@ -170,23 +77,45 @@ struct LibraryView: View {
             }
         }
         .task {
+            let taskStart = Date()
+            print("[LK-STARTUP] LibraryView.task start")
+            updateLocalDerivedData(from: localStories)
             viewModel.updateDownloadedIDs(from: localStories)
             viewModel.loadLocalData(localStories: localStories)
+            print("[LK-STARTUP] loadLocalData done: \(String(format: "%.1f", Date().timeIntervalSince(taskStart)*1000))ms (stories: \(viewModel.stories.count))")
             await viewModel.refresh(appState: appState, silent: true)
-            // Queue status runs async so the UI is never blocked
-            Task { await syncService.syncQueueStatus(for: viewModel.stories, modelContext: modelContext) }
-            Task { await syncService.syncMetadata(appState: appState, modelContext: modelContext) }
-            Task { await syncService.syncHighlights(appState: appState, modelContext: modelContext) }
-            // Delay heavier syncs so the grid can render before background I/O starts
+            print("[LK-STARTUP] refresh done: \(String(format: "%.1f", Date().timeIntervalSince(taskStart)*1000))ms")
+            let container = modelContext.container
+            let serverURL = appState.serverURL
+            let token = appState.apiToken
+            let proxyTokenId = appState.proxyTokenId
+            let proxyToken = appState.proxyToken
+            let stories = viewModel.stories
+            let serverReachable = !viewModel.isShowingCachedData
             Task {
-                try? await Task.sleep(for: .seconds(1))
-                await syncService.syncCovers(for: viewModel.stories, serverURL: appState.serverURL, token: appState.apiToken, proxyTokenId: appState.proxyTokenId,
-                                    proxyToken: appState.proxyToken, modelContext: modelContext)
+                try? await Task.sleep(for: .seconds(5))
+                await syncService.syncQueueStatus(for: stories, modelContainer: container)
+            }
+            guard serverReachable else { return }
+            Task {
+                try? await Task.sleep(for: .seconds(5))
+                await syncService.syncMetadata(serverURL: serverURL, token: token,
+                    proxyTokenId: proxyTokenId, proxyToken: proxyToken, modelContainer: container)
             }
             Task {
-                try? await Task.sleep(for: .seconds(2))
-                await syncService.syncContent(for: viewModel.stories, serverURL: appState.serverURL, token: appState.apiToken, proxyTokenId: appState.proxyTokenId,
-                                    proxyToken: appState.proxyToken, modelContext: modelContext, localStories: localStories)
+                try? await Task.sleep(for: .seconds(5))
+                await syncService.syncHighlights(serverURL: serverURL, token: token,
+                    proxyTokenId: proxyTokenId, proxyToken: proxyToken, modelContainer: container)
+            }
+            Task {
+                try? await Task.sleep(for: .seconds(6))
+                await syncService.syncCovers(for: stories, serverURL: serverURL, token: token,
+                    proxyTokenId: proxyTokenId, proxyToken: proxyToken, modelContainer: container)
+            }
+            Task {
+                try? await Task.sleep(for: .seconds(7))
+                await syncService.syncContent(for: stories, serverURL: serverURL, token: token,
+                    proxyTokenId: proxyTokenId, proxyToken: proxyToken, modelContainer: container)
             }
         }
         .task {
@@ -195,7 +124,13 @@ struct LibraryView: View {
                 try? await Task.sleep(for: .seconds(300))
                 guard !Task.isCancelled else { break }
                 await viewModel.refresh(appState: appState, silent: true)
-                await syncService.syncMetadata(appState: appState, modelContext: modelContext)
+                let container = modelContext.container
+                let serverURL = appState.serverURL
+                let token = appState.apiToken
+                let proxyTokenId = appState.proxyTokenId
+                let proxyToken = appState.proxyToken
+                await syncService.syncMetadata(serverURL: serverURL, token: token,
+                    proxyTokenId: proxyTokenId, proxyToken: proxyToken, modelContainer: container)
             } while !Task.isCancelled
         }
         .onChange(of: appState.isConfigured) { wasConfigured, isConfigured in
@@ -211,12 +146,123 @@ struct LibraryView: View {
             }
         }
         .onChange(of: localStories) { _, new in
+            updateLocalDerivedData(from: new)
             viewModel.updateDownloadedIDs(from: new)
         }
     }
 
+    private func updateLocalDerivedData(from stories: [LocalStory]) {
+        localByID = Dictionary(uniqueKeysWithValues: stories.map { ($0.storyID, $0) })
+        localQueuedIDs = Set(stories.filter { $0.inQueue }.map { $0.storyID })
+        localFavoritedIDs = Set(stories.filter { ($0.rating ?? 0) >= 5 }.map { $0.storyID })
+    }
+
+    @ViewBuilder
+    private var libraryContent: some View {
+        Group {
+            if viewModel.isLoading && viewModel.stories.isEmpty {
+                LibrarySkeletonView()
+            } else if !appState.isConfigured {
+                EmptyStateView(
+                    icon: "server.rack",
+                    title: "Server Not Configured",
+                    message: "Add your server URL and API token in Settings to get started."
+                )
+            } else if viewModel.filteredStories.isEmpty {
+                emptyStateContent
+            } else {
+                libraryGrid
+            }
+        }
+        .navigationTitle("LitKeeper")
+    }
+
+    @ViewBuilder
+    private var emptyStateContent: some View {
+        let hasError = viewModel.errorMessage != nil
+        let isEmpty = viewModel.stories.isEmpty
+        VStack(spacing: 16) {
+            EmptyStateView(
+                icon: hasError ? "wifi.slash" : "books.vertical",
+                title: hasError ? "Server Unreachable" : (isEmpty ? "Library Empty" : "No Results"),
+                message: hasError
+                    ? "Could not connect to your server. Check your connection or settings."
+                    : (isEmpty ? "Submit a Literotica URL to download your first story." : "Try adjusting your search or filters.")
+            )
+            if hasError || isEmpty {
+                Button {
+                    Task { await viewModel.refresh(appState: appState) }
+                } label: {
+                    Label("Retry", systemImage: "arrow.clockwise")
+                        .font(.subheadline)
+                }
+                .buttonStyle(.bordered)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var libraryGrid: some View {
+        ScrollView {
+            if viewModel.isShowingCachedData {
+                Label("Showing last synced library — server unreachable", systemImage: "wifi.slash")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal)
+                    .padding(.top, 8)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            LazyVGrid(columns: columns, spacing: 16) {
+                ForEach(Array(viewModel.filteredStories.enumerated()), id: \.element.id) { index, story in
+                    storyButton(story: story, index: index)
+                }
+            }
+            .padding()
+        }
+        .refreshable {
+            await viewModel.refresh(appState: appState)
+            HapticManager.shared.notify(.success)
+            await syncService.syncQueueStatus(for: viewModel.stories, modelContainer: modelContext.container)
+            cardsAppeared = false
+            Task { await syncService.syncCovers(for: viewModel.stories, serverURL: appState.serverURL, token: appState.apiToken, proxyTokenId: appState.proxyTokenId, proxyToken: appState.proxyToken, modelContainer: modelContext.container) }
+            Task { await syncService.syncContent(for: viewModel.stories, serverURL: appState.serverURL, token: appState.apiToken, proxyTokenId: appState.proxyTokenId, proxyToken: appState.proxyToken, modelContainer: modelContext.container) }
+            Task { await syncService.syncHighlights(serverURL: appState.serverURL, token: appState.apiToken, proxyTokenId: appState.proxyTokenId, proxyToken: appState.proxyToken, modelContainer: modelContext.container) }
+            try? await Task.sleep(for: .milliseconds(50))
+            cardsAppeared = true
+        }
+        .onAppear {
+            guard !cardsAppeared else { return }
+            cardsAppeared = true
+        }
+    }
+
+    private func storyButton(story: Story, index: Int) -> some View {
+        Button { selectedStory = story } label: {
+            StoryCard(
+                story: story,
+                isDownloaded: viewModel.isDownloaded(story),
+                isInQueue: story.inQueue || localQueuedIDs.contains(story.id),
+                isFavorited: story.rating == 5 || localFavoritedIDs.contains(story.id),
+                localRating: localByID[story.id]?.rating,
+                coverURL: coverURL(for: story),
+                fallbackURL: DownloadManager.shared.remoteCoverURL(storyID: story.id, serverURL: appState.serverURL),
+                token: appState.apiToken,
+                proxyTokenId: appState.proxyTokenId,
+                proxyToken: appState.proxyToken,
+                showCategory: showCategoryLabel
+            )
+        }
+        .buttonStyle(PressScaleButtonStyle())
+        .opacity(cardsAppeared ? 1 : 0)
+        .offset(y: cardsAppeared ? 0 : 12)
+        .animation(
+            .spring(response: 0.4, dampingFraction: 0.8).delay(Double(min(index, 8)) * 0.03),
+            value: cardsAppeared
+        )
+    }
+
     private func coverURL(for story: Story) -> URL? {
-        let local = localStories.first { $0.storyID == story.id }
+        let local = localByID[story.id]
         if let url = DownloadManager.shared.resolveCoverURL(for: story, localStory: local) { return url }
         guard !appState.serverURL.isEmpty else { return nil }
         let base = appState.serverURL.hasSuffix("/") ? String(appState.serverURL.dropLast()) : appState.serverURL
